@@ -370,6 +370,39 @@ function AdminView({ t, db }) {
   );
 }
 
+// 底部统一分析表格组件
+function StatTable({ title, columns, stats }) {
+  return (
+    <div className="mt-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm shrink-0">
+      <h3 className="text-md font-bold text-slate-800 mb-3">{title}</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-center border-collapse text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="py-2 px-4 font-bold text-slate-600 border-r border-slate-200">性别</th>
+              {columns.map(col => <th key={col.key} className="py-2 px-3 font-bold text-slate-600">{col.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-slate-100">
+              <td className="py-2 px-4 font-bold text-blue-600 border-r border-slate-100">男生</td>
+              {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.male[col.key]}</td>)}
+            </tr>
+            <tr className="border-b border-slate-100">
+              <td className="py-2 px-4 font-bold text-pink-600 border-r border-slate-100">女生</td>
+              {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.female[col.key]}</td>)}
+            </tr>
+            <tr className="bg-slate-50">
+              <td className="py-2 px-4 font-extrabold text-slate-800 border-r border-slate-200">总计</td>
+              {columns.map(col => <td key={col.key} className="py-2 px-3 font-bold text-slate-800">{stats.total[col.key]}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TeacherDashboard({ t, data, updateData }) {
   const [activeTab, setActiveTab] = useState('students');
 
@@ -404,7 +437,7 @@ function TeacherDashboard({ t, data, updateData }) {
         })}
       </div>
 
-      <div className="flex-1 bg-white rounded-3xl shadow-sm border border-slate-100 min-h-[700px] overflow-hidden">
+      <div className="flex-1 bg-white rounded-3xl shadow-sm border border-slate-100 min-h-[700px] overflow-hidden flex flex-col">
         {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
@@ -580,7 +613,7 @@ function SubjectsTab({ t, data, updateData }) {
   };
 
   return (
-    <div className="p-6 md:p-8">
+    <div className="p-6 md:p-8 flex-1">
       <h2 className="text-2xl font-extrabold text-slate-800 mb-8">{t.subjects}</h2>
       
       <div className="flex gap-3 mb-10 max-w-md">
@@ -673,6 +706,27 @@ function HomeworkTab({ t, data, updateData }) {
     document.body.removeChild(link);
   };
 
+  // 底部统计计算
+  const hwCols = statusConfig.map(sc => ({ key: sc.color, label: sc.label }));
+  hwCols.push({ key: 'none', label: '无记录' });
+
+  const hwStats = { male: {}, female: {}, total: {} };
+  hwCols.forEach(c => { hwStats.male[c.key]=0; hwStats.female[c.key]=0; hwStats.total[c.key]=0; });
+
+  if (selSub) {
+    filteredStudents.forEach(s => {
+      const st = data.homeworks[selSub]?.[dateStr]?.[s.id] || 'none';
+      const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
+      const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+
+      if (hwStats.total[st] !== undefined) {
+         if (isM) hwStats.male[st]++;
+         else if (isF) hwStats.female[st]++;
+         hwStats.total[st]++;
+      }
+    });
+  }
+
   return (
     <div className="p-6 md:p-8 h-full flex flex-col">
       <div className="flex flex-wrap gap-4 items-center justify-between mb-8 border-b border-slate-100 pb-6">
@@ -704,47 +758,52 @@ function HomeworkTab({ t, data, updateData }) {
           <p className="text-slate-400 font-bold text-lg">请先在右上角选择科目和日期</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto rounded-2xl border border-slate-200">
-          <table className="w-full text-left border-collapse min-w-[700px]">
-            <thead className="sticky top-0 bg-white z-10 shadow-sm border-b border-slate-200">
-              <tr>
-                <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.className}</th>
-                <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.chineseName} ({t.malayName})</th>
-                <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">当前选择日期状态 ({dateStr})</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStudents.map(s => {
-                const currentStatus = data.homeworks[selSub]?.[dateStr]?.[s.id];
-                return (
-                  <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                    <td className="py-3 px-4 font-bold text-indigo-600">{s.className}</td>
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-slate-800">{s.chineseName}</div>
-                      <div className="text-xs text-slate-500 font-medium">{s.malayName}</div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex gap-2">
-                        {statusConfig.map(sc => (
-                          <button
-                            key={sc.color}
-                            onClick={() => recordStatus(s.id, sc.color)}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ${
-                              currentStatus === sc.color 
-                                ? `${sc.bg} ${sc.text} shadow-md border-transparent scale-105` 
-                                : `bg-white border-slate-200 text-slate-400 hover:border-slate-300`
-                            }`}
-                          >
-                            {sc.label}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-left border-collapse min-w-[700px]">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm border-b border-slate-200">
+                <tr>
+                  <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.className}</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.chineseName} ({t.malayName})</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">当前选择日期状态 ({dateStr})</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.map(s => {
+                  const currentStatus = data.homeworks[selSub]?.[dateStr]?.[s.id];
+                  return (
+                    <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                      <td className="py-3 px-4 font-bold text-indigo-600">{s.className}</td>
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-800">{s.chineseName}</div>
+                        <div className="text-xs text-slate-500 font-medium">{s.malayName}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex gap-2">
+                          {statusConfig.map(sc => (
+                            <button
+                              key={sc.color}
+                              onClick={() => recordStatus(s.id, sc.color)}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ${
+                                currentStatus === sc.color 
+                                  ? `${sc.bg} ${sc.text} shadow-md border-transparent scale-105` 
+                                  : `bg-white border-slate-200 text-slate-400 hover:border-slate-300`
+                              }`}
+                            >
+                              {sc.label}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* 底部统计表格 */}
+          <StatTable title={`功课状态统计 (${dateStr})`} columns={hwCols} stats={hwStats} />
         </div>
       )}
     </div>
@@ -892,6 +951,30 @@ function ExamsTab({ t, data, updateData }) {
     document.body.removeChild(link);
   };
 
+  // 底部成绩统计计算
+  const examCols = [
+    { key: 'A', label: 'A' }, { key: 'B', label: 'B' }, { key: 'C', label: 'C' },
+    { key: 'D', label: 'D' }, { key: 'E', label: 'E' }, { key: 'F', label: 'F' }
+  ];
+  const gradeStats = { male: {}, female: {}, total: {} };
+  examCols.forEach(c => { gradeStats.male[c.key]=0; gradeStats.female[c.key]=0; gradeStats.total[c.key]=0; });
+
+  if (selSub && currentExam) {
+    filteredStudents.forEach(s => {
+      const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id];
+      const info = getGradeInfo(rec);
+      if (info && info.grade !== '-') {
+        const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
+        const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+        if (gradeStats.total[info.grade] !== undefined) {
+           if (isM) gradeStats.male[info.grade]++;
+           else if (isF) gradeStats.female[info.grade]++;
+           gradeStats.total[info.grade]++;
+        }
+      }
+    });
+  }
+
   return (
     <div className="p-6 md:p-8 h-full flex flex-col">
       <div className="flex flex-wrap gap-4 items-center justify-between mb-8 border-b border-slate-100 pb-6">
@@ -951,67 +1034,72 @@ function ExamsTab({ t, data, updateData }) {
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-inner">
-          <table className="w-full text-left border-collapse min-w-[900px]">
-            <thead className="sticky top-0 z-10 shadow-sm border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-32">{t.className}</th>
-                <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-48">姓名</th>
-                {currentExam.parts.map((pName, i) => (
-                  <th key={i} className="py-4 px-2 font-bold text-indigo-700 bg-indigo-50/50 text-center text-sm">{pName}</th>
-                ))}
-                <th className="py-4 px-2 font-bold text-rose-700 bg-rose-50/50 text-center text-sm">{t.deduction}</th>
-                <th className="py-4 px-3 font-bold text-slate-800 text-center bg-slate-100">{t.total50}</th>
-                <th className="py-4 px-3 font-bold text-slate-800 text-center bg-slate-200">{t.total100}</th>
-                <th className="py-4 px-4 font-bold text-slate-800 text-center">{t.grade}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStudents.map(s => {
-                const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
-                const gradeInfo = getGradeInfo(data.examRecords[selSub]?.[currentExam.id]?.[s.id]);
-                
-                return (
-                  <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                    <td className="py-2 px-4 font-bold text-indigo-600 border-r border-slate-100">{s.className}</td>
-                    <td className="py-2 px-4 border-r border-slate-100">
-                      <div className="font-bold text-slate-800 truncate">{s.chineseName}</div>
-                      <div className="text-xs text-slate-500 font-medium truncate w-40">{s.malayName}</div>
-                    </td>
-                    {currentExam.parts.map((pName, i) => (
-                      <td key={i} className="py-2 px-1 text-center">
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-inner">
+            <table className="w-full text-left border-collapse min-w-[900px]">
+              <thead className="sticky top-0 z-10 shadow-sm border-b border-slate-200 bg-slate-50">
+                <tr>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-32">{t.className}</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-48">姓名</th>
+                  {currentExam.parts.map((pName, i) => (
+                    <th key={i} className="py-4 px-2 font-bold text-indigo-700 bg-indigo-50/50 text-center text-sm">{pName}</th>
+                  ))}
+                  <th className="py-4 px-2 font-bold text-rose-700 bg-rose-50/50 text-center text-sm">{t.deduction}</th>
+                  <th className="py-4 px-3 font-bold text-slate-800 text-center bg-slate-100">{t.total50}</th>
+                  <th className="py-4 px-3 font-bold text-slate-800 text-center bg-slate-200">{t.total100}</th>
+                  <th className="py-4 px-4 font-bold text-slate-800 text-center">{t.grade}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.map(s => {
+                  const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+                  const gradeInfo = getGradeInfo(data.examRecords[selSub]?.[currentExam.id]?.[s.id]);
+                  
+                  return (
+                    <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="py-2 px-4 font-bold text-indigo-600 border-r border-slate-100">{s.className}</td>
+                      <td className="py-2 px-4 border-r border-slate-100">
+                        <div className="font-bold text-slate-800 truncate">{s.chineseName}</div>
+                        <div className="text-xs text-slate-500 font-medium truncate w-40">{s.malayName}</div>
+                      </td>
+                      {currentExam.parts.map((pName, i) => (
+                        <td key={i} className="py-2 px-1 text-center">
+                          <input 
+                            type="number" min="0"
+                            value={rec.parts[i] === 0 ? '' : rec.parts[i]} 
+                            onChange={(e)=>updateScore(s.id, i, e.target.value)}
+                            className="w-16 px-2 py-1.5 border border-indigo-100 rounded bg-white text-center font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="0"
+                          />
+                        </td>
+                      ))}
+                      <td className="py-2 px-1 text-center bg-rose-50/30">
                         <input 
                           type="number" min="0"
-                          value={rec.parts[i] === 0 ? '' : rec.parts[i]} 
-                          onChange={(e)=>updateScore(s.id, i, e.target.value)}
-                          className="w-16 px-2 py-1.5 border border-indigo-100 rounded bg-white text-center font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                          placeholder="0"
+                          value={rec.deduct === 0 ? '' : rec.deduct} 
+                          onChange={(e)=>updateDeduct(s.id, e.target.value)}
+                          className="w-16 px-2 py-1.5 border border-rose-200 rounded bg-white text-center font-bold text-rose-700 focus:ring-2 focus:ring-rose-500 outline-none"
+                          placeholder="-0"
                         />
                       </td>
-                    ))}
-                    <td className="py-2 px-1 text-center bg-rose-50/30">
-                      <input 
-                        type="number" min="0"
-                        value={rec.deduct === 0 ? '' : rec.deduct} 
-                        onChange={(e)=>updateDeduct(s.id, e.target.value)}
-                        className="w-16 px-2 py-1.5 border border-rose-200 rounded bg-white text-center font-bold text-rose-700 focus:ring-2 focus:ring-rose-500 outline-none"
-                        placeholder="-0"
-                      />
-                    </td>
-                    <td className="py-2 px-3 text-center font-mono font-bold text-slate-600 bg-slate-50">
-                      {gradeInfo.raw}
-                    </td>
-                    <td className="py-2 px-3 text-center font-mono font-bold text-lg bg-slate-100">
-                      {gradeInfo.pct}%
-                    </td>
-                    <td className={`py-2 px-4 text-center text-xl ${gradeInfo.color}`}>
-                      {gradeInfo.grade}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      <td className="py-2 px-3 text-center font-mono font-bold text-slate-600 bg-slate-50">
+                        {gradeInfo.raw}
+                      </td>
+                      <td className="py-2 px-3 text-center font-mono font-bold text-lg bg-slate-100">
+                        {gradeInfo.pct}%
+                      </td>
+                      <td className={`py-2 px-4 text-center text-xl ${gradeInfo.color}`}>
+                        {gradeInfo.grade}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 底部统计表格 */}
+          <StatTable title={`${currentExam.name} - 成绩统计`} columns={examCols} stats={gradeStats} />
         </div>
       )}
     </div>
@@ -1099,9 +1187,27 @@ function AnalysisTab({ t, data }) {
     document.body.removeChild(link);
   };
 
+  // 底部 TP 统计计算
+  const tpCols = [6,5,4,3,2,1].map(tp => ({ key: tp, label: `TP${tp}` }));
+  const tpStats = { male: {}, female: {}, total: {} };
+  tpCols.forEach(c => { tpStats.male[c.key]=0; tpStats.female[c.key]=0; tpStats.total[c.key]=0; });
+
+  studentsWithData.forEach(s => {
+     const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
+     const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+
+     s.activeSubjects.forEach(sub => {
+        if (tpStats.total[sub.tp] !== undefined) {
+           if (isM) tpStats.male[sub.tp]++;
+           else if (isF) tpStats.female[sub.tp]++;
+           tpStats.total[sub.tp]++;
+        }
+     });
+  });
+
   return (
-    <div className="p-6 md:p-8">
-      <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4">
+    <div className="p-6 md:p-8 flex-1 flex flex-col min-h-0">
+      <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4 shrink-0">
         <h2 className="text-2xl font-extrabold text-slate-800">{t.compareByStudent} (TP评级)</h2>
         <div className="flex gap-3">
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
@@ -1119,7 +1225,7 @@ function AnalysisTab({ t, data }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold shrink-0">
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP1 (F)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-orange-500 rounded-full"></div>TP2 (E)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div>TP3 (D)</div>
@@ -1133,40 +1239,45 @@ function AnalysisTab({ t, data }) {
           <p className="text-slate-400 font-bold text-lg">当前过滤条件下没有有效的 TP 评级数据</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {studentsWithData.map(stu => (
-            <div key={stu.id} className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="font-extrabold text-lg text-slate-800">{stu.chineseName}</h3>
-                  <p className="text-xs text-slate-500 font-medium">{stu.malayName}</p>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 flex-1 overflow-auto content-start pb-4">
+            {studentsWithData.map(stu => (
+              <div key={stu.id} className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="font-extrabold text-lg text-slate-800">{stu.chineseName}</h3>
+                    <p className="text-xs text-slate-500 font-medium">{stu.malayName}</p>
+                  </div>
+                  <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold border border-indigo-100">{stu.className}</span>
                 </div>
-                <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold border border-indigo-100">{stu.className}</span>
-              </div>
-              
-              <div className="space-y-4">
-                {/* 仅循环渲染此学生拥有 TP 分数的有效科目 */}
-                {stu.activeSubjects.map(({subName, tp}) => {
-                  const widthPct = (tp / 6) * 100;
-                  return (
-                    <div key={subName} className="flex flex-col gap-1">
-                      <div className="flex justify-between text-sm font-bold">
-                        <span className="text-slate-600">{subName}</span>
-                        <span className="text-slate-800">{`TP${tp}`}</span>
+                
+                <div className="space-y-4">
+                  {/* 仅循环渲染此学生拥有 TP 分数的有效科目 */}
+                  {stu.activeSubjects.map(({subName, tp}) => {
+                    const widthPct = (tp / 6) * 100;
+                    return (
+                      <div key={subName} className="flex flex-col gap-1">
+                        <div className="flex justify-between text-sm font-bold">
+                          <span className="text-slate-600">{subName}</span>
+                          <span className="text-slate-800">{`TP${tp}`}</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full ${tpColors[tp]} transition-all duration-1000 ease-out`}
+                            style={{ width: `${widthPct}%` }}
+                          ></div>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full ${tpColors[tp]} transition-all duration-1000 ease-out`}
-                          style={{ width: `${widthPct}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+
+          {/* 底部统计表格 */}
+          <StatTable title="TP 评级分布统计 (按累计获得人次)" columns={tpCols} stats={tpStats} />
+        </>
       )}
     </div>
   );
