@@ -24,8 +24,10 @@ const app = initializeApp(firebaseConfig);
 const firestoreDb = getFirestore(app);
 
 // ==========================================
-// 2. 翻译与多语言
+// 2. 基础配置与翻译
 // ==========================================
+const SEMESTERS = ['第一学期', '第二学期', '第三学期'];
+
 const translations = {
   zh: {
     systemName: '学生评估与进度跟踪系统 (云端版)',
@@ -75,11 +77,20 @@ const translations = {
     total50: '总分 (/50)',
     total100: '百分比 (/100)',
     grade: '等级',
-    compareByStudent: '按学生分析',
+    compareByStudent: '按学生综合分析',
     roomList: '房间列表 (所有者)',
     loginLogs: '登录日志',
     noData: '暂无数据',
   }
+};
+
+const tpColorStyles = {
+  1: 'bg-red-100 text-red-700 border border-red-200',
+  2: 'bg-orange-100 text-orange-700 border border-orange-200',
+  3: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
+  4: 'bg-green-100 text-green-700 border border-green-200',
+  5: 'bg-blue-100 text-blue-700 border border-blue-200',
+  6: 'bg-indigo-100 text-indigo-700 border border-indigo-200'
 };
 
 export default function App() {
@@ -90,20 +101,19 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState('');
   const [loadingDb, setLoadingDb] = useState(true);
   
-  // 云端数据本地映射
   const [db, setDb] = useState({ rooms: {}, logs: [], roomData: {} });
 
-  // 监听云端数据库
   useEffect(() => {
-    // 监听所有房间
     const unsubRooms = onSnapshot(collection(firestoreDb, 'rooms'), (snapshot) => {
       const newRooms = {};
       const newRoomData = {};
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         newRooms[docSnap.id] = { owner: data.owner };
-        // 增加 finalTPs 字段的默认初始化
-        newRoomData[docSnap.id] = data.roomData || { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} };
+        newRoomData[docSnap.id] = data.roomData || { 
+          students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, 
+          finalTPs: {}, homeworkTitles: {} 
+        };
       });
       setDb(prev => ({ ...prev, rooms: newRooms, roomData: newRoomData }));
       setLoadingDb(false);
@@ -112,11 +122,9 @@ export default function App() {
       setLoadingDb(false);
     });
 
-    // 监听所有登录日志
     const unsubLogs = onSnapshot(collection(firestoreDb, 'logs'), (snapshot) => {
       const newLogs = [];
       snapshot.forEach(docSnap => newLogs.push({ id: docSnap.id, ...docSnap.data() }));
-      // 客户端内存排序 (最新时间在前)
       newLogs.sort((a, b) => new Date(b.time) - new Date(a.time));
       setDb(prev => ({ ...prev, logs: newLogs }));
     }, (error) => {
@@ -127,24 +135,21 @@ export default function App() {
   }, []);
 
   const currentData = db.roomData[currentRoom] || { 
-    students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} 
+    students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, 
+    finalTPs: {}, homeworkTitles: {} 
   };
 
   const handleLogin = async (code, teacherName) => {
     if (!code) return;
-    
     const roomRef = doc(firestoreDb, 'rooms', code);
-    
     if (!db.rooms[code]) {
-      if (!teacherName) return; // UI层面已经拦截了，这里做安全校验
-      // 注册新房间并写入云端
+      if (!teacherName) return; 
       await setDoc(roomRef, {
         owner: teacherName,
-        roomData: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} }
+        roomData: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {}, homeworkTitles: {} }
       });
     }
 
-    // 写入登录日志到云端
     await addDoc(collection(firestoreDb, 'logs'), {
       time: new Date().toISOString(),
       room: code,
@@ -155,20 +160,14 @@ export default function App() {
     setAuthState('teacher');
   };
 
-  const handleAdminLogin = () => {
-    setAuthState('admin');
-  };
+  const handleAdminLogin = () => setAuthState('admin');
 
   const updateRoomData = async (newData) => {
     const updatedData = { ...currentData, ...newData };
-    
-    // 1. 乐观更新 (本地立刻变，不等网络，体验更好)
     setDb(prev => ({
       ...prev,
       roomData: { ...prev.roomData, [currentRoom]: updatedData }
     }));
-
-    // 2. 静默同步到 Firebase
     const roomRef = doc(firestoreDb, 'rooms', currentRoom);
     await setDoc(roomRef, { roomData: updatedData }, { merge: true });
   };
@@ -195,7 +194,6 @@ export default function App() {
             </span>
           )}
         </div>
-        
         <div className="flex items-center gap-4">
           {authState !== 'login' && (
             <button onClick={() => {setAuthState('login'); setCurrentRoom('');}} className="flex items-center gap-1 text-slate-500 hover:text-red-500 transition px-3 py-1.5 rounded-lg hover:bg-red-50">
@@ -209,9 +207,7 @@ export default function App() {
       <main className="p-4 md:p-6 max-w-[1400px] mx-auto">
         {authState === 'login' && <LoginView t={t} db={db} onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
         {authState === 'admin' && <AdminView t={t} db={db} />}
-        {authState === 'teacher' && (
-          <TeacherDashboard t={t} data={currentData} updateData={updateRoomData} />
-        )}
+        {authState === 'teacher' && <TeacherDashboard t={t} data={currentData} updateData={updateRoomData} />}
       </main>
     </div>
   );
@@ -221,8 +217,6 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
   const [code, setCode] = useState('');
   const [teacherName, setTeacherName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  
-  // Admin 登录状态
   const [showAdminInput, setShowAdminInput] = useState(false);
   const [adminPwd, setAdminPwd] = useState('');
   const [adminErrorMsg, setAdminErrorMsg] = useState('');
@@ -257,55 +251,30 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
         <div className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5">{t.roomCode}</label>
-            <input 
-              type="text" 
-              value={code} 
-              onChange={(e) => {setCode(e.target.value); setErrorMsg('');}}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all"
-              placeholder="输入房号进入或创建"
-            />
+            <input type="text" value={code} onChange={(e) => {setCode(e.target.value); setErrorMsg('');}} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition-all" placeholder="输入房号进入或创建" />
           </div>
           
           {isNewRoom && (
             <div className="animate-in fade-in slide-in-from-top-2">
               <label className="block text-sm font-bold text-emerald-600 mb-1.5">检测到新房号，{t.teacherName}</label>
-              <input 
-                type="text" 
-                value={teacherName} 
-                onChange={(e) => {setTeacherName(e.target.value); setErrorMsg('');}}
-                className={`w-full px-4 py-2.5 bg-emerald-50 border rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none transition-all ${errorMsg ? 'border-red-400' : 'border-emerald-200'}`}
-                placeholder="例如: 林老师 (Mr. Lim)"
-              />
+              <input type="text" value={teacherName} onChange={(e) => {setTeacherName(e.target.value); setErrorMsg('');}} className={`w-full px-4 py-2.5 bg-emerald-50 border rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none transition-all ${errorMsg ? 'border-red-400' : 'border-emerald-200'}`} placeholder="例如: 林老师 (Mr. Lim)" />
               {errorMsg && <p className="text-xs text-red-500 font-bold mt-2">{errorMsg}</p>}
             </div>
           )}
 
-          <button 
-            onClick={handleLoginSubmit}
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl hover:bg-indigo-700 transition-all font-bold shadow-md shadow-indigo-200 mt-2"
-          >
+          <button onClick={handleLoginSubmit} className="w-full bg-indigo-600 text-white py-3 rounded-xl hover:bg-indigo-700 transition-all font-bold shadow-md shadow-indigo-200 mt-2">
             {isNewRoom ? t.createRoom : t.enterRoom}
           </button>
         </div>
       </div>
       
-      {/* Admin 登录入口与输入框 */}
       {!showAdminInput ? (
-        <button 
-          onClick={() => setShowAdminInput(true)}
-          className="mt-16 text-[10px] text-slate-300 hover:text-slate-500 transition-colors tracking-widest uppercase"
-        >
+        <button onClick={() => setShowAdminInput(true)} className="mt-16 text-[10px] text-slate-300 hover:text-slate-500 transition-colors tracking-widest uppercase">
           admin
         </button>
       ) : (
         <div className="mt-12 flex flex-col items-center gap-3 animate-in fade-in slide-in-from-bottom-2">
-          <input
-            type="password"
-            value={adminPwd}
-            onChange={(e) => {setAdminPwd(e.target.value); setAdminErrorMsg('');}}
-            placeholder="输入 Admin 密码"
-            className={`px-4 py-2 bg-white border rounded-xl text-center text-sm font-medium focus:ring-2 focus:ring-slate-400 outline-none transition-all shadow-sm ${adminErrorMsg ? 'border-red-400' : 'border-slate-200'}`}
-          />
+          <input type="password" value={adminPwd} onChange={(e) => {setAdminPwd(e.target.value); setAdminErrorMsg('');}} placeholder="输入 Admin 密码" className={`px-4 py-2 bg-white border rounded-xl text-center text-sm font-medium focus:ring-2 focus:ring-slate-400 outline-none transition-all shadow-sm ${adminErrorMsg ? 'border-red-400' : 'border-slate-200'}`} />
           <div className="flex gap-2">
             <button onClick={handleAdminSubmit} className="px-4 py-1.5 bg-slate-800 text-white text-sm font-bold rounded-lg hover:bg-slate-700 shadow-md">登录后台</button>
             <button onClick={() => {setShowAdminInput(false); setAdminPwd(''); setAdminErrorMsg('');}} className="px-4 py-1.5 bg-white text-slate-600 text-sm font-bold border border-slate-200 rounded-lg hover:bg-slate-50">取消</button>
@@ -327,10 +296,7 @@ function AdminView({ t, db }) {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold flex items-center gap-2 text-slate-800">
-        <Settings className="w-6 h-6" /> {t.adminPanel}
-      </h2>
-      
+      <h2 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Settings className="w-6 h-6" /> {t.adminPanel}</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="font-bold text-lg mb-4 text-slate-700">{t.roomList}</h3>
@@ -348,7 +314,6 @@ function AdminView({ t, db }) {
             ))}
           </ul>
         </div>
-
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="font-bold text-lg mb-4 text-slate-700">{t.loginLogs}</h3>
           <div className="max-h-[500px] overflow-y-auto pr-2">
@@ -370,8 +335,12 @@ function AdminView({ t, db }) {
   );
 }
 
-// 底部统一分析表格组件
+// 底部带总人数的统计表
 function StatTable({ title, columns, stats }) {
+  const maleTotal = columns.reduce((acc, col) => acc + (stats.male[col.key] || 0), 0);
+  const femaleTotal = columns.reduce((acc, col) => acc + (stats.female[col.key] || 0), 0);
+  const grandTotal = maleTotal + femaleTotal;
+
   return (
     <div className="mt-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm shrink-0">
       <h3 className="text-md font-bold text-slate-800 mb-3">{title}</h3>
@@ -379,22 +348,26 @@ function StatTable({ title, columns, stats }) {
         <table className="w-full text-center border-collapse text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="py-2 px-4 font-bold text-slate-600 border-r border-slate-200">性别</th>
+              <th className="py-2 px-4 font-bold text-slate-600 border-r border-slate-200 text-left">性别</th>
               {columns.map(col => <th key={col.key} className="py-2 px-3 font-bold text-slate-600">{col.label}</th>)}
+              <th className="py-2 px-4 font-extrabold text-indigo-700 border-l border-slate-200 bg-indigo-50/50">合计人数</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-slate-100">
-              <td className="py-2 px-4 font-bold text-blue-600 border-r border-slate-100">男生 (L)</td>
+            <tr className="border-b border-slate-100 hover:bg-slate-50">
+              <td className="py-2 px-4 font-bold text-blue-600 border-r border-slate-100 text-left">男生 (L)</td>
               {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.male[col.key]}</td>)}
+              <td className="py-2 px-4 font-bold text-blue-700 border-l border-slate-100 bg-indigo-50/30">{maleTotal}</td>
             </tr>
-            <tr className="border-b border-slate-100">
-              <td className="py-2 px-4 font-bold text-pink-600 border-r border-slate-100">女生 (P)</td>
+            <tr className="border-b border-slate-100 hover:bg-slate-50">
+              <td className="py-2 px-4 font-bold text-pink-600 border-r border-slate-100 text-left">女生 (P)</td>
               {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.female[col.key]}</td>)}
+              <td className="py-2 px-4 font-bold text-pink-700 border-l border-slate-100 bg-indigo-50/30">{femaleTotal}</td>
             </tr>
             <tr className="bg-slate-50">
-              <td className="py-2 px-4 font-extrabold text-slate-800 border-r border-slate-200">总计</td>
+              <td className="py-2 px-4 font-extrabold text-slate-800 border-r border-slate-200 text-left">横向总计</td>
               {columns.map(col => <td key={col.key} className="py-2 px-3 font-bold text-slate-800">{stats.total[col.key]}</td>)}
+              <td className="py-2 px-4 font-extrabold text-indigo-800 border-l border-slate-200 bg-indigo-100/50 text-lg">{grandTotal}</td>
             </tr>
           </tbody>
         </table>
@@ -442,7 +415,7 @@ function TeacherDashboard({ t, data, updateData }) {
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} />}
+        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
       </div>
     </div>
   );
@@ -494,9 +467,7 @@ function StudentsTab({ t, data, updateData }) {
   };
 
   const saveEdit = () => {
-    updateData({
-      students: data.students.map(s => s.id === editingId ? editForm : s)
-    });
+    updateData({ students: data.students.map(s => s.id === editingId ? editForm : s) });
     setEditingId(null);
   };
 
@@ -546,10 +517,7 @@ function StudentsTab({ t, data, updateData }) {
                         <button onClick={() => startEdit(s)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-md">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => removeStudent(s.id)} 
-                          className={`p-1.5 rounded-md text-sm font-bold transition-all ${confirmDeleteId === s.id ? 'bg-red-500 text-white px-3' : 'text-slate-400 hover:text-red-600 hover:bg-red-100'}`}
-                        >
+                        <button onClick={() => removeStudent(s.id)} className={`p-1.5 rounded-md text-sm font-bold transition-all ${confirmDeleteId === s.id ? 'bg-red-500 text-white px-3' : 'text-slate-400 hover:text-red-600 hover:bg-red-100'}`}>
                           {confirmDeleteId === s.id ? "确认删除?" : <Trash2 className="w-4 h-4" />}
                         </button>
                       </td>
@@ -563,33 +531,18 @@ function StudentsTab({ t, data, updateData }) {
 
         <div className="bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100 h-fit">
           <h3 className="font-bold text-indigo-800 mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            {t.batchImport}
+            <FileText className="w-5 h-5" /> {t.batchImport}
           </h3>
           <div className="mb-4">
             <label className="block text-sm font-bold text-indigo-700 mb-1">{t.targetClass}</label>
-            <input 
-              type="text" 
-              value={importClass}
-              onChange={e => setImportClass(e.target.value)}
-              className="w-full px-3 py-2 border border-indigo-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-              placeholder="e.g. 1A, 2B"
-            />
+            <input type="text" value={importClass} onChange={e => setImportClass(e.target.value)} className="w-full px-3 py-2 border border-indigo-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700" placeholder="e.g. 1A, 2B" />
           </div>
           <p className="text-xs text-indigo-600/70 mb-2 font-medium">{t.importDesc}</p>
           <p className="text-xs font-mono text-slate-500 bg-white p-2 rounded border border-indigo-100 mb-4">
             A001, Ali bin Abu, 阿里, L<br/>A002, Siti Nurhaliza, 茜蒂, P
           </p>
-          <textarea
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            className="w-full h-40 p-3 border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none mb-4 resize-none shadow-inner"
-            placeholder="在此处粘贴 Excel 内容..."
-          />
-          <button 
-            onClick={handleImport}
-            className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 hover:shadow-lg transition-all"
-          >
+          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="w-full h-40 p-3 border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none mb-4 resize-none shadow-inner" placeholder="在此处粘贴 Excel 内容..." />
+          <button onClick={handleImport} className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 hover:shadow-lg transition-all">
             {t.importBtn}
           </button>
         </div>
@@ -607,28 +560,17 @@ function SubjectsTab({ t, data, updateData }) {
       setNewSub('');
     }
   };
-
-  const removeSubject = (sub) => {
-    updateData({ subjects: data.subjects.filter(s => s !== sub) });
-  };
+  const removeSubject = (sub) => updateData({ subjects: data.subjects.filter(s => s !== sub) });
 
   return (
     <div className="p-6 md:p-8 flex-1">
       <h2 className="text-2xl font-extrabold text-slate-800 mb-8">{t.subjects}</h2>
-      
       <div className="flex gap-3 mb-10 max-w-md">
-        <input 
-          type="text" 
-          value={newSub}
-          onChange={(e) => setNewSub(e.target.value)}
-          placeholder={t.subjectName}
-          className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-        />
+        <input type="text" value={newSub} onChange={(e) => setNewSub(e.target.value)} placeholder={t.subjectName} className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium" />
         <button onClick={addSubject} className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-700 flex items-center gap-2 shadow-md shadow-indigo-200 transition-all">
           <Plus className="w-5 h-5" /> 添加
         </button>
       </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {data.subjects.map(sub => (
           <div key={sub} className="bg-gradient-to-br from-white to-slate-50 border border-slate-200 p-5 rounded-2xl flex justify-between items-center group shadow-sm hover:shadow-md transition-all">
@@ -644,33 +586,35 @@ function SubjectsTab({ t, data, updateData }) {
 }
 
 function HomeworkTab({ t, data, updateData }) {
+  const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
   const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
 
-  const classes = useMemo(() => {
-    const cls = new Set(data.students.map(s => s.className));
-    return Array.from(cls).sort();
-  }, [data.students]);
+  const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
+  const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
-  const filteredStudents = useMemo(() => {
-    if(!selClass) return data.students;
-    return data.students.filter(s => s.className === selClass);
-  }, [data.students, selClass]);
+  const currentHwTitle = data.homeworkTitles?.[selTerm]?.[selSub]?.[dateStr] || '';
+  const handleTitleChange = (val) => {
+    const newTitles = { ...(data.homeworkTitles || {}) };
+    if (!newTitles[selTerm]) newTitles[selTerm] = {};
+    if (!newTitles[selTerm][selSub]) newTitles[selTerm][selSub] = {};
+    newTitles[selTerm][selSub][dateStr] = val;
+    updateData({ homeworkTitles: newTitles });
+  };
 
   const recordStatus = (studentId, statusColor) => {
     if (!selSub || !dateStr) return;
     const newHw = { ...data.homeworks };
-    if (!newHw[selSub]) newHw[selSub] = {};
-    if (!newHw[selSub][dateStr]) newHw[selSub][dateStr] = {};
+    if (!newHw[selTerm]) newHw[selTerm] = {};
+    if (!newHw[selTerm][selSub]) newHw[selTerm][selSub] = {};
+    if (!newHw[selTerm][selSub][dateStr]) newHw[selTerm][selSub][dateStr] = {};
     
-    // 如果点击同一个状态，则清除（实现删除功能）
-    if (newHw[selSub][dateStr][studentId] === statusColor) {
-      delete newHw[selSub][dateStr][studentId];
+    if (newHw[selTerm][selSub][dateStr][studentId] === statusColor) {
+      delete newHw[selTerm][selSub][dateStr][studentId];
     } else {
-      newHw[selSub][dateStr][studentId] = statusColor;
+      newHw[selTerm][selSub][dateStr][studentId] = statusColor;
     }
-    
     updateData({ homeworks: newHw });
   };
 
@@ -682,14 +626,14 @@ function HomeworkTab({ t, data, updateData }) {
     { color: 'gray', label: t.hwGray, bg: 'bg-slate-200 hover:bg-slate-300', text: 'text-slate-600' },
   ];
 
-  // 功课导出功能
   const exportHomeworkToCSV = () => {
     if (!selSub || !dateStr) return;
-    const headers = ['班级', '中文姓名', '马来文姓名', `功课状态 (${dateStr})`];
+    const titleStr = currentHwTitle ? ` - ${currentHwTitle}` : '';
+    const headers = ['学期', '班级', '中文姓名', '马来文姓名', `功课状态 (${dateStr}${titleStr})`];
     const rows = filteredStudents.map(s => {
-      const st = data.homeworks[selSub]?.[dateStr]?.[s.id];
+      const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
       const label = statusConfig.find(sc => sc.color === st)?.label || '-';
-      return [s.className, s.chineseName, s.malayName, label].map(val => `"${val}"`).join(',');
+      return [selTerm, s.className, s.chineseName, s.malayName, label].map(val => `"${val}"`).join(',');
     });
     
     const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
@@ -697,25 +641,20 @@ function HomeworkTab({ t, data, updateData }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    
-    const fileNameClass = selClass || '所有班级';
-    link.setAttribute('download', `${fileNameClass}_${selSub}_${dateStr}_功课.csv`);
-    
+    link.setAttribute('download', `${selTerm}_${selClass || '所有班级'}_${selSub}_${dateStr}_功课.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // 底部统计计算
   const hwCols = statusConfig.map(sc => ({ key: sc.color, label: sc.label }));
   hwCols.push({ key: 'none', label: '无记录' });
-
   const hwStats = { male: {}, female: {}, total: {} };
   hwCols.forEach(c => { hwStats.male[c.key]=0; hwStats.female[c.key]=0; hwStats.total[c.key]=0; });
 
   if (selSub) {
     filteredStudents.forEach(s => {
-      const st = data.homeworks[selSub]?.[dateStr]?.[s.id] || 'none';
+      const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id] || 'none';
       const g = s.gender.toUpperCase();
       const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
       const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
@@ -730,33 +669,46 @@ function HomeworkTab({ t, data, updateData }) {
 
   return (
     <div className="p-6 md:p-8 h-full flex flex-col">
-      <div className="flex flex-wrap gap-4 items-center justify-between mb-8 border-b border-slate-100 pb-6">
-        <h2 className="text-2xl font-extrabold text-slate-800">{t.homework}</h2>
-        <div className="flex flex-wrap gap-3">
-          <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
-            <option value="">{t.allClasses}</option>
-            {classes.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl font-bold text-indigo-700 outline-none">
-            <option value="">-- {t.selectSubject} --</option>
-            {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <input type="date" value={dateStr} onChange={e=>setDateStr(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none"/>
-          
-          {selSub && (
-            <button 
-              onClick={exportHomeworkToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2"
-            >
-              <Download className="w-4 h-4" /> 导出 Excel
-            </button>
-          )}
+      <div className="flex flex-col gap-4 mb-8 border-b border-slate-100 pb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-2xl font-extrabold text-slate-800">{t.homework}</h2>
+          <div className="flex flex-wrap gap-3">
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold outline-none shadow-md shadow-indigo-200 cursor-pointer">
+              {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
+            </select>
+            <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
+              <option value="">{t.allClasses}</option>
+              {classes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl font-bold text-indigo-700 outline-none">
+              <option value="">-- {t.selectSubject} --</option>
+              {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input type="date" value={dateStr} onChange={e=>setDateStr(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none"/>
+            {selSub && (
+              <button onClick={exportHomeworkToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
+                <Download className="w-4 h-4" /> 导出 Excel
+              </button>
+            )}
+          </div>
         </div>
+        {selSub && (
+          <div className="w-full mt-2 bg-indigo-50/50 px-4 py-3 rounded-xl border border-indigo-100 flex items-center gap-3">
+            <PenTool className="w-5 h-5 text-indigo-500 shrink-0" />
+            <input 
+              type="text" 
+              value={currentHwTitle} 
+              onChange={e => handleTitleChange(e.target.value)}
+              placeholder="在这里填写今日功课内容标题 (例如: 单元一练习, Buku Kerja ms 10)..."
+              className="flex-1 bg-transparent border-none outline-none font-bold text-slate-700 placeholder-slate-400"
+            />
+          </div>
+        )}
       </div>
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50">
-          <p className="text-slate-400 font-bold text-lg">请先在右上角选择科目和日期</p>
+          <p className="text-slate-400 font-bold text-lg">请先在上方选择学期、科目和日期</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
@@ -766,12 +718,15 @@ function HomeworkTab({ t, data, updateData }) {
                 <tr>
                   <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.className}</th>
                   <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">{t.chineseName} ({t.malayName})</th>
-                  <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">当前选择日期状态 ({dateStr})</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 bg-slate-50">
+                    当前选择日期状态 ({dateStr})
+                    {currentHwTitle && <div className="text-indigo-600 font-medium text-xs mt-0.5">{currentHwTitle}</div>}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredStudents.map(s => {
-                  const currentStatus = data.homeworks[selSub]?.[dateStr]?.[s.id];
+                  const currentStatus = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
                   return (
                     <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/50">
                       <td className="py-3 px-4 font-bold text-indigo-600">{s.className}</td>
@@ -802,9 +757,7 @@ function HomeworkTab({ t, data, updateData }) {
               </tbody>
             </table>
           </div>
-          
-          {/* 底部统计表格 */}
-          <StatTable title={`功课状态统计 (${dateStr})`} columns={hwCols} stats={hwStats} />
+          <StatTable title={`功课状态统计 (${selTerm} - ${dateStr})`} columns={hwCols} stats={hwStats} />
         </div>
       )}
     </div>
@@ -812,19 +765,19 @@ function HomeworkTab({ t, data, updateData }) {
 }
 
 function ExamsTab({ t, data, updateData }) {
+  const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
   const [selExamId, setSelExamId] = useState('');
   
   const [newExamName, setNewExamName] = useState('');
   const [newExamParts, setNewExamParts] = useState('');
-  
   const [confirmDeleteExam, setConfirmDeleteExam] = useState(false);
 
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
-  const examsForSub = data.examsConfig[selSub] || [];
+  const examsForSub = data.examsConfig?.[selTerm]?.[selSub] || [];
   const currentExam = examsForSub.find(e => e.id === selExamId);
 
   const createExam = () => {
@@ -833,8 +786,9 @@ function ExamsTab({ t, data, updateData }) {
     if(parts.length === 0) return;
 
     const newExam = { id: Date.now().toString(), name: newExamName.trim(), parts };
-    const newConfig = { ...data.examsConfig };
-    newConfig[selSub] = [...(newConfig[selSub] || []), newExam];
+    const newConfig = { ...(data.examsConfig || {}) };
+    if (!newConfig[selTerm]) newConfig[selTerm] = {};
+    newConfig[selTerm][selSub] = [...(newConfig[selTerm][selSub] || []), newExam];
     
     updateData({ examsConfig: newConfig });
     setNewExamName('');
@@ -842,15 +796,14 @@ function ExamsTab({ t, data, updateData }) {
     setSelExamId(newExam.id);
   };
 
-  // 删除当前选择的考试
   const deleteCurrentExam = () => {
     if (confirmDeleteExam) {
-      const newConfig = { ...data.examsConfig };
-      newConfig[selSub] = newConfig[selSub].filter(e => e.id !== selExamId);
+      const newConfig = { ...(data.examsConfig || {}) };
+      newConfig[selTerm][selSub] = newConfig[selTerm][selSub].filter(e => e.id !== selExamId);
       
-      const newRecords = { ...data.examRecords };
-      if (newRecords[selSub]) {
-        delete newRecords[selSub][currentExam.id];
+      const newRecords = { ...(data.examRecords || {}) };
+      if (newRecords[selTerm]?.[selSub]) {
+        delete newRecords[selTerm][selSub][currentExam.id];
       }
       
       updateData({ examsConfig: newConfig, examRecords: newRecords });
@@ -865,30 +818,28 @@ function ExamsTab({ t, data, updateData }) {
   const updateScore = (studentId, partIndex, valStr) => {
     if(!selSub || !currentExam) return;
     const val = parseFloat(valStr) || 0;
-    
     const newRecords = { ...data.examRecords };
-    if(!newRecords[selSub]) newRecords[selSub] = {};
-    if(!newRecords[selSub][currentExam.id]) newRecords[selSub][currentExam.id] = {};
+    if(!newRecords[selTerm]) newRecords[selTerm] = {};
+    if(!newRecords[selTerm][selSub]) newRecords[selTerm][selSub] = {};
+    if(!newRecords[selTerm][selSub][currentExam.id]) newRecords[selTerm][selSub][currentExam.id] = {};
     
-    const studentRec = newRecords[selSub][currentExam.id][studentId] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+    const studentRec = newRecords[selTerm][selSub][currentExam.id][studentId] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
     studentRec.parts[partIndex] = val;
-    
-    newRecords[selSub][currentExam.id][studentId] = studentRec;
+    newRecords[selTerm][selSub][currentExam.id][studentId] = studentRec;
     updateData({ examRecords: newRecords });
   };
 
   const updateDeduct = (studentId, valStr) => {
     if(!selSub || !currentExam) return;
     const val = parseFloat(valStr) || 0;
-    
     const newRecords = { ...data.examRecords };
-    if(!newRecords[selSub]) newRecords[selSub] = {};
-    if(!newRecords[selSub][currentExam.id]) newRecords[selSub][currentExam.id] = {};
+    if(!newRecords[selTerm]) newRecords[selTerm] = {};
+    if(!newRecords[selTerm][selSub]) newRecords[selTerm][selSub] = {};
+    if(!newRecords[selTerm][selSub][currentExam.id]) newRecords[selTerm][selSub][currentExam.id] = {};
     
-    const studentRec = newRecords[selSub][currentExam.id][studentId] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+    const studentRec = newRecords[selTerm][selSub][currentExam.id][studentId] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
     studentRec.deduct = val;
-    
-    newRecords[selSub][currentExam.id][studentId] = studentRec;
+    newRecords[selTerm][selSub][currentExam.id][studentId] = studentRec;
     updateData({ examRecords: newRecords });
   };
 
@@ -909,50 +860,29 @@ function ExamsTab({ t, data, updateData }) {
     return { raw, pct, grade, color };
   };
 
-  // 导出为 CSV 功能
   const exportToCSV = () => {
     if (!selSub || !currentExam) return;
-
-    // 1. 准备表头
-    const headers = ['班级', '中文姓名', '马来文姓名', ...currentExam.parts, '扣错字分', '总分(/50)', '百分比(/100)', '等级'];
-
-    // 2. 准备数据行
+    const headers = ['学期', '班级', '中文姓名', '马来文姓名', ...currentExam.parts, '扣错字分', '总分(/50)', '百分比(/100)', '等级'];
     const rows = filteredStudents.map(s => {
-      const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+      const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
       const gradeInfo = getGradeInfo(rec);
-
-      // 将每一列数据用引号包裹，防止名字里带逗号破坏格式
       return [
-        s.className,
-        s.chineseName,
-        s.malayName,
-        ...rec.parts,
-        rec.deduct,
-        gradeInfo.raw,
-        `${gradeInfo.pct}%`,
-        gradeInfo.grade
+        selTerm, s.className, s.chineseName, s.malayName,
+        ...rec.parts, rec.deduct, gradeInfo.raw, `${gradeInfo.pct}%`, gradeInfo.grade
       ].map(val => `"${val}"`).join(',');
     });
 
-    // 3. 组合并添加 UTF-8 BOM 签名（防止 Excel 中文乱码）
     const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
-    
-    // 4. 创建文件并触发下载
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    
-    // 生成文件名 (例如: 4M_华文_年中考_成绩.csv)
-    const fileNameClass = selClass || '所有班级';
-    link.setAttribute('download', `${fileNameClass}_${selSub}_${currentExam.name}_成绩.csv`);
-    
+    link.setAttribute('download', `${selTerm}_${selClass || '所有班级'}_${selSub}_${currentExam.name}_成绩.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // 底部成绩统计计算
   const examCols = [
     { key: 'A', label: 'A' }, { key: 'B', label: 'B' }, { key: 'C', label: 'C' },
     { key: 'D', label: 'D' }, { key: 'E', label: 'E' }, { key: 'F', label: 'F' }
@@ -962,13 +892,12 @@ function ExamsTab({ t, data, updateData }) {
 
   if (selSub && currentExam) {
     filteredStudents.forEach(s => {
-      const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id];
+      const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id];
       const info = getGradeInfo(rec);
       if (info && info.grade !== '-') {
         const g = s.gender.toUpperCase();
         const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
         const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
-        
         if (gradeStats.total[info.grade] !== undefined) {
            if (isM) gradeStats.male[info.grade]++;
            else if (isF) gradeStats.female[info.grade]++;
@@ -983,6 +912,9 @@ function ExamsTab({ t, data, updateData }) {
       <div className="flex flex-wrap gap-4 items-center justify-between mb-8 border-b border-slate-100 pb-6">
         <h2 className="text-2xl font-extrabold text-slate-800">{t.exam}</h2>
         <div className="flex flex-wrap gap-3">
+          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold outline-none shadow-md shadow-indigo-200 cursor-pointer">
+            {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
+          </select>
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
             <option value="">{t.allClasses}</option>
             {classes.map(c => <option key={c} value={c}>{c}</option>)}
@@ -999,16 +931,10 @@ function ExamsTab({ t, data, updateData }) {
           )}
           {currentExam && (
             <div className="flex gap-2 ml-2">
-              <button 
-                onClick={exportToCSV}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all"
-              >
+              <button onClick={exportToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all">
                 <Download className="w-4 h-4" /> 导出 Excel
               </button>
-              <button 
-                onClick={deleteCurrentExam}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${confirmDeleteExam ? 'bg-red-600 text-white shadow-md shadow-red-200' : 'bg-white text-red-500 border border-red-200 hover:bg-red-50'}`}
-              >
+              <button onClick={deleteCurrentExam} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${confirmDeleteExam ? 'bg-red-600 text-white shadow-md shadow-red-200' : 'bg-white text-red-500 border border-red-200 hover:bg-red-50'}`}>
                 <Trash2 className="w-4 h-4" /> {confirmDeleteExam ? '确认删除?' : '删除考试'}
               </button>
             </div>
@@ -1018,11 +944,11 @@ function ExamsTab({ t, data, updateData }) {
 
       {!selSub ? (
          <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50">
-           <p className="text-slate-400 font-bold text-lg">请先选择科目进行管理</p>
+           <p className="text-slate-400 font-bold text-lg">请先在上方选择学期和科目</p>
          </div>
       ) : !currentExam ? (
         <div className="bg-white p-8 border border-slate-200 rounded-3xl shadow-sm max-w-xl mx-auto mt-10">
-          <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2"><Plus className="w-6 h-6 text-indigo-500"/> {t.addExam}</h3>
+          <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2"><Plus className="w-6 h-6 text-indigo-500"/> 在【{selTerm}】添加新考试</h3>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">{t.examType}</label>
@@ -1031,7 +957,6 @@ function ExamsTab({ t, data, updateData }) {
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">{t.examParts}</label>
               <input type="text" value={newExamParts} onChange={e=>setNewExamParts(e.target.value)} placeholder="如: 甲组, 乙组, 丙组 (逗号分隔)" className="w-full p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-medium"/>
-              <p className="text-xs text-slate-400 mt-2">提示：系统会自动增加一个“扣错字分”的栏位，并将各部分总分减去扣分后，乘以2换算为100分制。</p>
             </div>
             <button onClick={createExam} className="w-full py-3 mt-4 bg-indigo-600 text-white rounded-xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700">创建新考试配置</button>
           </div>
@@ -1055,8 +980,8 @@ function ExamsTab({ t, data, updateData }) {
               </thead>
               <tbody>
                 {filteredStudents.map(s => {
-                  const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
-                  const gradeInfo = getGradeInfo(data.examRecords[selSub]?.[currentExam.id]?.[s.id]);
+                  const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+                  const gradeInfo = getGradeInfo(data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id]);
                   
                   return (
                     <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -1100,9 +1025,7 @@ function ExamsTab({ t, data, updateData }) {
               </tbody>
             </table>
           </div>
-
-          {/* 底部统计表格 */}
-          <StatTable title={`${currentExam.name} - 成绩统计`} columns={examCols} stats={gradeStats} />
+          <StatTable title={`${selTerm} - ${currentExam.name} - 成绩统计`} columns={examCols} stats={gradeStats} />
         </div>
       )}
     </div>
@@ -1110,17 +1033,13 @@ function ExamsTab({ t, data, updateData }) {
 }
 
 function AnalysisTab({ t, data, updateData }) {
+  const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
-  const [selExamId, setSelExamId] = useState('');
 
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const classFilteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
-  const examsForSub = data.examsConfig[selSub] || [];
-  const currentExam = examsForSub.find(e => e.id === selExamId);
-
-  // 1. 考试成绩转化为建议TP (跟平时测验等级挂钩)
   const getSuggestedTP = (pct) => {
     if(pct >= 82) return 6;
     if(pct >= 66) return 5;
@@ -1130,23 +1049,24 @@ function AnalysisTab({ t, data, updateData }) {
     return 1;
   };
 
-  // 2. 统计学生的功课表现 (用于表格中展示，提供给老师作为核定TP的参考)
-  const getHwSummary = (studentId) => {
-    if (!selSub) return { node: null, text: '无记录' };
-    const hws = data.homeworks[selSub] || {};
-    let g=0, y=0, r=0, b=0, gr=0;
+  const getTermSummary = (term, subject, studentId) => {
+    // 1. 功课统计
+    const hws = data.homeworks?.[term]?.[subject] || {};
+    let g=0, y=0, r=0, b=0, gr=0, hwScore=0, hwCount=0;
     Object.values(hws).forEach(day => {
       const st = day[studentId];
-      if(st === 'green') g++;
-      else if(st === 'yellow') y++;
-      else if(st === 'red') r++;
-      else if(st === 'black') b++;
-      else if(st === 'gray') gr++;
+      if(st) {
+         hwCount++;
+         if(st === 'green') { g++; hwScore += 100; }
+         else if(st === 'yellow') { y++; hwScore += 75; }
+         else if(st === 'red') { r++; hwScore += 40; }
+         else if(st === 'black') { b++; }
+         else if(st === 'gray') { gr++; }
+      }
     });
-    
-    const total = g+y+r+b+gr;
-    if (total === 0) return { node: <span className="text-slate-400">无记录</span>, text: '无记录' };
-    
+    const hwPct = hwCount > 0 ? Math.round(hwScore / hwCount) : null;
+    const hwTP = hwPct !== null ? getSuggestedTP(hwPct) : null;
+
     const parts = [];
     if(g>0) parts.push(`达标:${g}`);
     if(y>0) parts.push(`尚可:${y}`);
@@ -1154,71 +1074,96 @@ function AnalysisTab({ t, data, updateData }) {
     if(b>0) parts.push(`缺席:${b}`);
     if(gr>0) parts.push(`没做:${gr}`);
 
-    return {
-      text: parts.join(', '),
-      node: (
-        <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs font-bold bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+    const hwNode = hwCount === 0 ? (
+      <span className="text-slate-400 text-sm font-medium">无记录</span>
+    ) : (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+           <span className={`px-2 py-0.5 rounded text-xs font-bold ${tpColorStyles[hwTP] || 'bg-slate-100 text-slate-600'}`}>平时功课 TP{hwTP}</span>
+           <span className="text-xs font-bold text-slate-500">平均 {hwPct}%</span>
+        </div>
+        <div className="flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-bold bg-slate-50 p-1.5 rounded border border-slate-100">
           {g > 0 && <span className="text-emerald-600">达标:{g}</span>}
           {y > 0 && <span className="text-yellow-600">尚可:{y}</span>}
           {r > 0 && <span className="text-red-500">未达:{r}</span>}
           {b > 0 && <span className="text-slate-800">缺席:{b}</span>}
           {gr > 0 && <span className="text-slate-400">没做:{gr}</span>}
         </div>
-      )
+      </div>
+    );
+
+    // 2. 考试统计 (该学期所有考试的平均)
+    const exams = data.examsConfig?.[term]?.[subject] || [];
+    let exScore = 0, exCount = 0;
+    exams.forEach(ex => {
+      const rec = data.examRecords?.[term]?.[subject]?.[ex.id]?.[studentId];
+      if(rec) {
+        const sum = rec.parts.reduce((a,v)=>a+v, 0);
+        if(sum > 0 || rec.deduct > 0) {
+          const raw = Math.max(0, sum - rec.deduct);
+          exScore += Math.min(100, raw * 2);
+          exCount++;
+        }
+      }
+    });
+    const exPct = exCount > 0 ? Math.round(exScore / exCount) : null;
+
+    // 3. 综合评定 (功课 50% + 考试 50%)
+    let overallPct = 0;
+    if (hwPct !== null && exPct !== null) overallPct = Math.round((hwPct + exPct) / 2);
+    else if (hwPct !== null) overallPct = hwPct;
+    else if (exPct !== null) overallPct = exPct;
+
+    const suggestedTP = (hwPct === null && exPct === null) ? null : getSuggestedTP(overallPct);
+
+    return {
+      hasData: hwCount > 0 || exCount > 0,
+      hwPct, exPct, overallPct, suggestedTP,
+      hwText: hwCount > 0 ? `TP${hwTP} (${hwPct}%) [${parts.join(', ')}]` : '无记录',
+      hwNode
     };
   };
 
-  // 3. 过滤出在【选定科目 + 选定考试】中有分数的学生，并生成完整的表格数据对象
   const studentsWithData = useMemo(() => {
-    if (!selSub || !currentExam) return [];
-    
+    if (!selSub) return [];
     return classFilteredStudents.map(stu => {
-      const rec = data.examRecords[selSub]?.[currentExam.id]?.[stu.id];
-      if (!rec) return null;
+      // 获取当前选择学期的表现
+      const summary = getTermSummary(selTerm, selSub, stu.id);
       
-      const sum = rec.parts.reduce((a,b)=>a+b, 0);
-      const raw = Math.max(0, sum - rec.deduct);
-      const pct = Math.min(100, raw * 2);
+      // 只要他在当前选择的学期有功课/考试记录，或者老师已经为他打过最终TP，就显示出来
+      const hasAnyFinalTPInTerm = data.finalTPs?.[selSub]?.[selTerm]?.[stu.id] !== undefined;
       
-      if (sum === 0 && rec.deduct === 0) return null; // 排除完全没输入的空记录
-      
-      const suggestedTP = getSuggestedTP(pct);
-      // 提取老师手动覆盖的最终 TP (如果有的话)
-      const finalTP = data.finalTPs?.[selSub]?.[currentExam.id]?.[stu.id] || '';
-      const hwInfo = getHwSummary(stu.id);
+      if (!summary.hasData && !hasAnyFinalTPInTerm) return null;
 
-      return { ...stu, examPct: pct, suggestedTP, finalTP, hwNode: hwInfo.node, hwText: hwInfo.text };
+      return { ...stu, summary };
     }).filter(Boolean);
-  }, [classFilteredStudents, selSub, currentExam, data.examRecords, data.finalTPs, data.homeworks]);
+  }, [classFilteredStudents, selSub, selTerm, data.examRecords, data.finalTPs, data.homeworks, data.examsConfig]);
 
-  // 老师修改最终 TP
-  const handleFinalTPChange = (studentId, val) => {
+  const handleFinalTPChange = (studentId, term, val) => {
     const newFinalTPs = { ...(data.finalTPs || {}) };
     if (!newFinalTPs[selSub]) newFinalTPs[selSub] = {};
-    if (!newFinalTPs[selSub][currentExam.id]) newFinalTPs[selSub][currentExam.id] = {};
+    if (!newFinalTPs[selSub][term]) newFinalTPs[selSub][term] = {};
     
-    newFinalTPs[selSub][currentExam.id][studentId] = val;
+    if (val === '') delete newFinalTPs[selSub][term][studentId];
+    else newFinalTPs[selSub][term][studentId] = val;
+    
     updateData({ finalTPs: newFinalTPs });
   };
 
-  // 导出分析页面的 Excel 数据 (基于最终决定)
   const exportAnalysisToCSV = () => {
     if (studentsWithData.length === 0) return;
-    
-    const headers = ['班级', '中文姓名', '马来文姓名', '功课综合表现', '考试得分', '建议TP', '最终核定TP'];
-    
+    const headers = ['班级', '中文姓名', '马来文姓名', `${selTerm}功课综合`, `${selTerm}考试平均`, `${selTerm}系统建议TP`, '第一学期最终TP', '第二学期最终TP', '第三学期最终TP'];
     const rows = studentsWithData.map(s => {
-      // 导出的数据一目了然
-      const finalTpVal = s.finalTP ? `TP${s.finalTP}` : `TP${s.suggestedTP} (系统建议)`;
-      return [
-        s.className,
-        s.chineseName,
-        s.malayName,
-        s.hwText,
-        `${s.examPct}%`,
-        `TP${s.suggestedTP}`,
-        finalTpVal
-      ].map(val => `"${val}"`).join(',');
+      const examText = s.summary.exPct !== null ? `${s.summary.exPct}%` : '无记录';
+      const suggText = s.summary.suggestedTP ? `TP${s.summary.suggestedTP} (${s.summary.overallPct}%)` : '-';
+      
+      const row = [s.className, s.chineseName, s.malayName, s.summary.hwText, examText, suggText];
+      
+      SEMESTERS.forEach(term => {
+        const finalTP = data.finalTPs?.[selSub]?.[term]?.[s.id];
+        row.push(finalTP ? `TP${finalTP}` : '-');
+      });
+      return row.map(val => `"${val}"`).join(',');
     });
 
     const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
@@ -1226,15 +1171,12 @@ function AnalysisTab({ t, data, updateData }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    
-    const classStr = selClass || '所有班级';
-    link.setAttribute('download', `${classStr}_${selSub}_${currentExam.name}_TP评级分析.csv`);
+    link.setAttribute('download', `${selClass || '所有班级'}_${selSub}_全年TP评级综合分析.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // 底部 TP 统计计算 (优先使用老师选择的 finalTP，如果没选则使用建议 TP)
   const tpCols = [6,5,4,3,2,1].map(tp => ({ key: tp.toString(), label: `TP ${tp}` }));
   const tpStats = { male: {}, female: {}, total: {} };
   tpCols.forEach(c => { tpStats.male[c.key]=0; tpStats.female[c.key]=0; tpStats.total[c.key]=0; });
@@ -1244,114 +1186,130 @@ function AnalysisTab({ t, data, updateData }) {
      const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
      const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
 
-     const activeTP = Number(s.finalTP) || s.suggestedTP;
+     // 优先使用该学期老师核定的最终 TP，如果没有，才用系统的建议 TP
+     const activeTP = Number(data.finalTPs?.[selSub]?.[selTerm]?.[s.id]) || s.summary.suggestedTP;
 
-     if (tpStats.total[activeTP] !== undefined) {
+     if (activeTP && tpStats.total[activeTP] !== undefined) {
         if (isM) tpStats.male[activeTP]++;
         else if (isF) tpStats.female[activeTP]++;
         tpStats.total[activeTP]++;
      }
   });
 
-  const tpColorStyles = {
-    1: 'bg-red-100 text-red-700', 2: 'bg-orange-100 text-orange-700', 3: 'bg-yellow-100 text-yellow-700',
-    4: 'bg-green-100 text-green-700', 5: 'bg-blue-100 text-blue-700', 6: 'bg-indigo-100 text-indigo-700'
-  };
-
   return (
     <div className="p-6 md:p-8 flex-1 flex flex-col min-h-0">
       <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4 shrink-0">
-        <h2 className="text-2xl font-extrabold text-slate-800">{t.compareByStudent} (TP评级)</h2>
+        <h2 className="text-2xl font-extrabold text-slate-800">{t.compareByStudent} (学期汇总)</h2>
         <div className="flex flex-wrap gap-3">
+          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold outline-none shadow-md shadow-indigo-200 cursor-pointer">
+            {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
+          </select>
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
             <option value="">{t.allClasses}</option>
             {classes.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={selSub} onChange={e=>{setSelSub(e.target.value); setSelExamId('');}} className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl font-bold text-indigo-700 outline-none">
+          <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl font-bold text-indigo-700 outline-none">
             <option value="">-- {t.selectSubject} --</option>
             {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          {selSub && (
-            <select value={selExamId} onChange={e=>setSelExamId(e.target.value)} className="px-4 py-2 bg-rose-50 border border-rose-200 rounded-xl font-bold text-rose-700 outline-none">
-              <option value="">-- 选择考试 --</option>
-              {examsForSub.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          )}
-          {currentExam && studentsWithData.length > 0 && (
-            <button 
-              onClick={exportAnalysisToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2"
-            >
-              <Download className="w-4 h-4" /> 导出 Excel
+          {selSub && studentsWithData.length > 0 && (
+            <button onClick={exportAnalysisToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
+              <Download className="w-4 h-4" /> 导出分析名单
             </button>
           )}
         </div>
       </div>
 
-      {!selSub || !currentExam ? (
+      {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
-          <p className="text-slate-400 font-bold text-lg">请在上方选择科目和考试，以生成详细名单和分析</p>
+          <p className="text-slate-400 font-bold text-lg">请在上方选择学期和科目，生成综合分析名单</p>
         </div>
       ) : studentsWithData.length === 0 ? (
         <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
-          <p className="text-slate-400 font-bold text-lg">该考试目前还没有输入任何成绩</p>
+          <p className="text-slate-400 font-bold text-lg">该班级在【{selTerm}】没有任何功课或考试数据</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-inner">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
               <thead className="sticky top-0 z-10 shadow-sm border-b border-slate-200 bg-slate-50">
                 <tr>
                   <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-24">{t.className}</th>
                   <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-48">姓名</th>
-                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200">功课表现参考</th>
-                  <th className="py-4 px-4 font-bold text-indigo-700 border-r border-slate-200 text-center">考试得分</th>
-                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 text-center w-32">建议 TP</th>
-                  <th className="py-4 px-4 font-bold text-rose-700 text-center w-48">👨‍🏫 核定最终 TP</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200">
+                    <div className="text-indigo-700">{selTerm}</div>功课累计表现
+                  </th>
+                  <th className="py-4 px-4 font-bold border-r border-slate-200 text-center w-32">
+                    <div className="text-indigo-700">{selTerm}</div>所有考试平均
+                  </th>
+                  <th className="py-4 px-4 font-bold border-r border-slate-200 text-center w-32 bg-slate-100">
+                    <div className="text-indigo-700">{selTerm}</div>系统建议 TP
+                  </th>
+                  {SEMESTERS.map(term => (
+                    <th key={term} className={`py-4 px-2 font-bold text-center w-36 border-l border-slate-200 ${term === selTerm ? 'bg-rose-50 text-rose-700' : 'text-slate-500 bg-slate-50'}`}>
+                      👨‍🏫 {term}<br/>最终核定 TP
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {studentsWithData.map(s => {
+                  const activeFinalTP = data.finalTPs?.[selSub]?.[selTerm]?.[s.id];
                   return (
-                    <tr key={s.id} className="border-b border-slate-100 hover:bg-indigo-50/30 transition-colors">
+                    <tr key={s.id} className={`border-b border-slate-100 transition-colors ${activeFinalTP ? 'bg-rose-50/20 hover:bg-rose-50/40' : 'hover:bg-slate-50'}`}>
                       <td className="py-3 px-4 font-bold text-indigo-600 border-r border-slate-100">{s.className}</td>
                       <td className="py-3 px-4 border-r border-slate-100">
                         <div className="font-bold text-slate-800 truncate">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-medium truncate w-40">{s.malayName}</div>
                       </td>
-                      <td className="py-3 px-4 border-r border-slate-100">{s.hwNode}</td>
-                      <td className="py-3 px-4 border-r border-slate-100 text-center font-mono font-bold text-lg text-slate-700">
-                        {s.examPct}%
+                      <td className="py-3 px-4 border-r border-slate-100">{s.summary.hwNode}</td>
+                      <td className="py-3 px-4 border-r border-slate-100 text-center font-mono font-bold text-lg text-indigo-700 bg-indigo-50/30">
+                        {s.summary.exPct !== null ? `${s.summary.exPct}%` : <span className="text-sm text-slate-400">无记录</span>}
                       </td>
-                      <td className="py-3 px-4 border-r border-slate-100 text-center">
-                        <span className={`px-3 py-1 rounded-lg font-extrabold text-sm ${tpColorStyles[s.suggestedTP]}`}>
-                          TP {s.suggestedTP}
-                        </span>
+                      <td className="py-3 px-4 border-r border-slate-100 text-center bg-slate-50">
+                        {s.summary.suggestedTP ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`px-3 py-1 rounded-lg font-extrabold text-sm ${tpColorStyles[s.summary.suggestedTP]}`}>
+                              TP {s.summary.suggestedTP}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-bold bg-white px-2 py-0.5 rounded border border-slate-200">综合平均 {s.summary.overallPct}%</span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">-</span>
+                        )}
                       </td>
-                      <td className="py-3 px-4 text-center bg-rose-50/20">
-                        <select
-                          value={s.finalTP}
-                          onChange={(e) => handleFinalTPChange(s.id, e.target.value)}
-                          className={`w-full px-2 py-1.5 border rounded-lg font-extrabold text-sm outline-none transition-all cursor-pointer ${s.finalTP ? 'border-rose-400 bg-rose-50 text-rose-700 focus:ring-2 focus:ring-rose-500' : 'border-slate-200 bg-white text-slate-500 focus:ring-2 focus:ring-slate-400 hover:border-slate-300'}`}
-                        >
-                          <option value="">-- 同建议TP --</option>
-                          <option value="6">🥇 确定为 TP 6</option>
-                          <option value="5">🥈 确定为 TP 5</option>
-                          <option value="4">🥉 确定为 TP 4</option>
-                          <option value="3">确定为 TP 3</option>
-                          <option value="2">确定为 TP 2</option>
-                          <option value="1">确定为 TP 1</option>
-                        </select>
-                      </td>
+                      {/* 三大学期的下拉框对比输入 */}
+                      {SEMESTERS.map(term => {
+                        const isCurrentTerm = term === selTerm;
+                        const termFinalTP = data.finalTPs?.[selSub]?.[term]?.[s.id] || '';
+                        return (
+                          <td key={term} className={`py-3 px-2 text-center border-l border-slate-100 ${isCurrentTerm ? 'bg-rose-50/20' : ''}`}>
+                            <select
+                              value={termFinalTP}
+                              onChange={(e) => handleFinalTPChange(s.id, term, e.target.value)}
+                              className={`w-full px-1 py-2 border rounded-lg font-extrabold text-xs outline-none transition-all cursor-pointer shadow-sm text-center
+                                ${termFinalTP ? 'border-rose-400 bg-rose-500 text-white focus:ring-2 focus:ring-rose-300' 
+                                : isCurrentTerm ? 'border-rose-200 bg-white text-slate-500 focus:ring-2 focus:ring-rose-300 hover:border-rose-300' 
+                                : 'border-slate-200 bg-slate-50 text-slate-400 hover:bg-white'}`}
+                            >
+                              <option value="">{isCurrentTerm ? '默认采用建议' : '未评'}</option>
+                              <option value="6">TP 6</option>
+                              <option value="5">TP 5</option>
+                              <option value="4">TP 4</option>
+                              <option value="3">TP 3</option>
+                              <option value="2">TP 2</option>
+                              <option value="1">TP 1</option>
+                            </select>
+                          </td>
+                        )
+                      })}
                     </tr>
                   )
                 })}
               </tbody>
             </table>
           </div>
-
-          {/* 底部统计表格 */}
-          <StatTable title={`TP 评级分布统计 (${currentExam.name} - 采用老师最终核定数据)`} columns={tpCols} stats={tpStats} />
+          <StatTable title={`【${selTerm}】综合最终 TP 评级分布 (优先使用老师核定数据)`} columns={tpCols} stats={tpStats} />
         </div>
       )}
     </div>
