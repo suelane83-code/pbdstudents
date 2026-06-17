@@ -102,7 +102,8 @@ export default function App() {
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         newRooms[docSnap.id] = { owner: data.owner };
-        newRoomData[docSnap.id] = data.roomData || { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {} };
+        // 增加 finalTPs 字段的默认初始化
+        newRoomData[docSnap.id] = data.roomData || { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} };
       });
       setDb(prev => ({ ...prev, rooms: newRooms, roomData: newRoomData }));
       setLoadingDb(false);
@@ -126,7 +127,7 @@ export default function App() {
   }, []);
 
   const currentData = db.roomData[currentRoom] || { 
-    students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {} 
+    students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} 
   };
 
   const handleLogin = async (code, teacherName) => {
@@ -139,7 +140,7 @@ export default function App() {
       // 注册新房间并写入云端
       await setDoc(roomRef, {
         owner: teacherName,
-        roomData: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {} }
+        roomData: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {} }
       });
     }
 
@@ -317,7 +318,6 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
 }
 
 function AdminView({ t, db }) {
-  // 格式化 ISO 日期
   const formatDate = (isoString) => {
     try {
       const d = new Date(isoString);
@@ -385,11 +385,11 @@ function StatTable({ title, columns, stats }) {
           </thead>
           <tbody>
             <tr className="border-b border-slate-100">
-              <td className="py-2 px-4 font-bold text-blue-600 border-r border-slate-100">男生</td>
+              <td className="py-2 px-4 font-bold text-blue-600 border-r border-slate-100">男生 (L)</td>
               {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.male[col.key]}</td>)}
             </tr>
             <tr className="border-b border-slate-100">
-              <td className="py-2 px-4 font-bold text-pink-600 border-r border-slate-100">女生</td>
+              <td className="py-2 px-4 font-bold text-pink-600 border-r border-slate-100">女生 (P)</td>
               {columns.map(col => <td key={col.key} className="py-2 px-3 text-slate-700">{stats.female[col.key]}</td>)}
             </tr>
             <tr className="bg-slate-50">
@@ -578,7 +578,7 @@ function StudentsTab({ t, data, updateData }) {
           </div>
           <p className="text-xs text-indigo-600/70 mb-2 font-medium">{t.importDesc}</p>
           <p className="text-xs font-mono text-slate-500 bg-white p-2 rounded border border-indigo-100 mb-4">
-            A001, Ali bin Abu, 阿里, 男<br/>A002, Siti Nurhaliza, 茜蒂, 女
+            A001, Ali bin Abu, 阿里, L<br/>A002, Siti Nurhaliza, 茜蒂, P
           </p>
           <textarea
             value={importText}
@@ -716,8 +716,9 @@ function HomeworkTab({ t, data, updateData }) {
   if (selSub) {
     filteredStudents.forEach(s => {
       const st = data.homeworks[selSub]?.[dateStr]?.[s.id] || 'none';
-      const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
-      const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+      const g = s.gender.toUpperCase();
+      const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
+      const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
 
       if (hwStats.total[st] !== undefined) {
          if (isM) hwStats.male[st]++;
@@ -964,8 +965,10 @@ function ExamsTab({ t, data, updateData }) {
       const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id];
       const info = getGradeInfo(rec);
       if (info && info.grade !== '-') {
-        const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
-        const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+        const g = s.gender.toUpperCase();
+        const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
+        const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
+        
         if (gradeStats.total[info.grade] !== undefined) {
            if (isM) gradeStats.male[info.grade]++;
            else if (isF) gradeStats.female[info.grade]++;
@@ -1106,73 +1109,116 @@ function ExamsTab({ t, data, updateData }) {
   );
 }
 
-function AnalysisTab({ t, data }) {
+function AnalysisTab({ t, data, updateData }) {
+  const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
+  const [selExamId, setSelExamId] = useState('');
+
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
-  const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
+  const classFilteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
-  const calcSubjectTP = (subject, studentId) => {
-    const exams = data.examsConfig[subject] || [];
-    if (exams.length === 0) return 0;
+  const examsForSub = data.examsConfig[selSub] || [];
+  const currentExam = examsForSub.find(e => e.id === selExamId);
 
-    let totalPct = 0;
-    let validExams = 0;
-
-    exams.forEach(ex => {
-      const rec = data.examRecords[subject]?.[ex.id]?.[studentId];
-      if (rec) {
-        const sum = rec.parts.reduce((a,b)=>a+b, 0);
-        const raw = Math.max(0, sum - rec.deduct);
-        const pct = Math.min(100, raw * 2);
-        totalPct += pct;
-        validExams++;
-      }
-    });
-
-    if (validExams === 0) return 0;
-    const avgPct = totalPct / validExams;
-
-    if(avgPct >= 82) return 6;
-    if(avgPct >= 66) return 5;
-    if(avgPct >= 50) return 4;
-    if(avgPct >= 35) return 3;
-    if(avgPct >= 20) return 2;
+  // 1. 考试成绩转化为建议TP (跟平时测验等级挂钩)
+  const getSuggestedTP = (pct) => {
+    if(pct >= 82) return 6;
+    if(pct >= 66) return 5;
+    if(pct >= 50) return 4;
+    if(pct >= 35) return 3;
+    if(pct >= 20) return 2;
     return 1;
   };
 
-  const tpColors = {
-    1: 'bg-red-500', 2: 'bg-orange-500', 3: 'bg-yellow-500',
-    4: 'bg-green-500', 5: 'bg-blue-500', 6: 'bg-indigo-600', 0: 'bg-slate-200'
+  // 2. 统计学生的功课表现 (用于表格中展示，提供给老师作为核定TP的参考)
+  const getHwSummary = (studentId) => {
+    if (!selSub) return { node: null, text: '无记录' };
+    const hws = data.homeworks[selSub] || {};
+    let g=0, y=0, r=0, b=0, gr=0;
+    Object.values(hws).forEach(day => {
+      const st = day[studentId];
+      if(st === 'green') g++;
+      else if(st === 'yellow') y++;
+      else if(st === 'red') r++;
+      else if(st === 'black') b++;
+      else if(st === 'gray') gr++;
+    });
+    
+    const total = g+y+r+b+gr;
+    if (total === 0) return { node: <span className="text-slate-400">无记录</span>, text: '无记录' };
+    
+    const parts = [];
+    if(g>0) parts.push(`达标:${g}`);
+    if(y>0) parts.push(`尚可:${y}`);
+    if(r>0) parts.push(`未达:${r}`);
+    if(b>0) parts.push(`缺席:${b}`);
+    if(gr>0) parts.push(`没做:${gr}`);
+
+    return {
+      text: parts.join(', '),
+      node: (
+        <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs font-bold bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+          {g > 0 && <span className="text-emerald-600">达标:{g}</span>}
+          {y > 0 && <span className="text-yellow-600">尚可:{y}</span>}
+          {r > 0 && <span className="text-red-500">未达:{r}</span>}
+          {b > 0 && <span className="text-slate-800">缺席:{b}</span>}
+          {gr > 0 && <span className="text-slate-400">没做:{gr}</span>}
+        </div>
+      )
+    };
   };
 
-  // 核心改动：自动过滤出“有输入数据的学生”以及“有数据的科目”
+  // 3. 过滤出在【选定科目 + 选定考试】中有分数的学生，并生成完整的表格数据对象
   const studentsWithData = useMemo(() => {
-    return filteredStudents.map(stu => {
-      // 找出这个学生所有有成绩 (TP > 0) 的科目
-      const activeSubjects = data.subjects.map(sub => {
-        return { subName: sub, tp: calcSubjectTP(sub, stu.id) };
-      }).filter(item => item.tp > 0);
+    if (!selSub || !currentExam) return [];
+    
+    return classFilteredStudents.map(stu => {
+      const rec = data.examRecords[selSub]?.[currentExam.id]?.[stu.id];
+      if (!rec) return null;
+      
+      const sum = rec.parts.reduce((a,b)=>a+b, 0);
+      const raw = Math.max(0, sum - rec.deduct);
+      const pct = Math.min(100, raw * 2);
+      
+      if (sum === 0 && rec.deduct === 0) return null; // 排除完全没输入的空记录
+      
+      const suggestedTP = getSuggestedTP(pct);
+      // 提取老师手动覆盖的最终 TP (如果有的话)
+      const finalTP = data.finalTPs?.[selSub]?.[currentExam.id]?.[stu.id] || '';
+      const hwInfo = getHwSummary(stu.id);
 
-      // 将有成绩的科目附加到学生对象上
-      return { ...stu, activeSubjects };
-    }).filter(stu => stu.activeSubjects.length > 0); // 如果学生没有任何科目的成绩，就不显示该学生
-  }, [filteredStudents, data.subjects, data.examsConfig, data.examRecords]);
+      return { ...stu, examPct: pct, suggestedTP, finalTP, hwNode: hwInfo.node, hwText: hwInfo.text };
+    }).filter(Boolean);
+  }, [classFilteredStudents, selSub, currentExam, data.examRecords, data.finalTPs, data.homeworks]);
 
-  // 导出分析页面的 Excel 数据
+  // 老师修改最终 TP
+  const handleFinalTPChange = (studentId, val) => {
+    const newFinalTPs = { ...(data.finalTPs || {}) };
+    if (!newFinalTPs[selSub]) newFinalTPs[selSub] = {};
+    if (!newFinalTPs[selSub][currentExam.id]) newFinalTPs[selSub][currentExam.id] = {};
+    
+    newFinalTPs[selSub][currentExam.id][studentId] = val;
+    updateData({ finalTPs: newFinalTPs });
+  };
+
+  // 导出分析页面的 Excel 数据 (基于最终决定)
   const exportAnalysisToCSV = () => {
     if (studentsWithData.length === 0) return;
     
-    // 表头：包含动态的所有科目名称
-    const headers = ['班级', '中文姓名', '马来文姓名', ...data.subjects];
+    const headers = ['班级', '中文姓名', '马来文姓名', '功课综合表现', '考试得分', '建议TP', '最终核定TP'];
     
     const rows = studentsWithData.map(s => {
-      const row = [s.className, s.chineseName, s.malayName];
-      // 对应每个科目的位置，如果有成绩填 TP，没成绩填 -
-      data.subjects.forEach(sub => {
-        const found = s.activeSubjects.find(as => as.subName === sub);
-        row.push(found && found.tp > 0 ? `TP${found.tp}` : '-');
-      });
-      return row.map(val => `"${val}"`).join(',');
+      // 导出的数据一目了然
+      const finalTpVal = s.finalTP ? `TP${s.finalTP}` : `TP${s.suggestedTP} (系统建议)`;
+      return [
+        s.className,
+        s.chineseName,
+        s.malayName,
+        s.hwText,
+        `${s.examPct}%`,
+        `TP${s.suggestedTP}`,
+        finalTpVal
+      ].map(val => `"${val}"`).join(',');
     });
 
     const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
@@ -1181,43 +1227,60 @@ function AnalysisTab({ t, data }) {
     const link = document.createElement('a');
     link.href = url;
     
-    link.setAttribute('download', `${selClass || '所有班级'}_TP评级分析.csv`);
+    const classStr = selClass || '所有班级';
+    link.setAttribute('download', `${classStr}_${selSub}_${currentExam.name}_TP评级分析.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // 底部 TP 统计计算
-  const tpCols = [6,5,4,3,2,1].map(tp => ({ key: tp, label: `TP${tp}` }));
+  // 底部 TP 统计计算 (优先使用老师选择的 finalTP，如果没选则使用建议 TP)
+  const tpCols = [6,5,4,3,2,1].map(tp => ({ key: tp.toString(), label: `TP ${tp}` }));
   const tpStats = { male: {}, female: {}, total: {} };
   tpCols.forEach(c => { tpStats.male[c.key]=0; tpStats.female[c.key]=0; tpStats.total[c.key]=0; });
 
   studentsWithData.forEach(s => {
-     const isM = s.gender.includes('男') || s.gender.toLowerCase() === 'm';
-     const isF = s.gender.includes('女') || s.gender.toLowerCase() === 'f';
+     const g = s.gender.toUpperCase();
+     const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
+     const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
 
-     s.activeSubjects.forEach(sub => {
-        if (tpStats.total[sub.tp] !== undefined) {
-           if (isM) tpStats.male[sub.tp]++;
-           else if (isF) tpStats.female[sub.tp]++;
-           tpStats.total[sub.tp]++;
-        }
-     });
+     const activeTP = Number(s.finalTP) || s.suggestedTP;
+
+     if (tpStats.total[activeTP] !== undefined) {
+        if (isM) tpStats.male[activeTP]++;
+        else if (isF) tpStats.female[activeTP]++;
+        tpStats.total[activeTP]++;
+     }
   });
+
+  const tpColorStyles = {
+    1: 'bg-red-100 text-red-700', 2: 'bg-orange-100 text-orange-700', 3: 'bg-yellow-100 text-yellow-700',
+    4: 'bg-green-100 text-green-700', 5: 'bg-blue-100 text-blue-700', 6: 'bg-indigo-100 text-indigo-700'
+  };
 
   return (
     <div className="p-6 md:p-8 flex-1 flex flex-col min-h-0">
       <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4 shrink-0">
         <h2 className="text-2xl font-extrabold text-slate-800">{t.compareByStudent} (TP评级)</h2>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
             <option value="">{t.allClasses}</option>
             {classes.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          {studentsWithData.length > 0 && (
+          <select value={selSub} onChange={e=>{setSelSub(e.target.value); setSelExamId('');}} className="px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl font-bold text-indigo-700 outline-none">
+            <option value="">-- {t.selectSubject} --</option>
+            {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {selSub && (
+            <select value={selExamId} onChange={e=>setSelExamId(e.target.value)} className="px-4 py-2 bg-rose-50 border border-rose-200 rounded-xl font-bold text-rose-700 outline-none">
+              <option value="">-- 选择考试 --</option>
+              {examsForSub.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          )}
+          {currentExam && studentsWithData.length > 0 && (
             <button 
               onClick={exportAnalysisToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2"
             >
               <Download className="w-4 h-4" /> 导出 Excel
             </button>
@@ -1225,59 +1288,71 @@ function AnalysisTab({ t, data }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold shrink-0">
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP1 (F)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-orange-500 rounded-full"></div>TP2 (E)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div>TP3 (D)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP4 (C)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-blue-500 rounded-full"></div>TP5 (B)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-indigo-600 rounded-full"></div>TP6 (A)</div>
-      </div>
-
-      {studentsWithData.length === 0 ? (
-        <div className="flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
-          <p className="text-slate-400 font-bold text-lg">当前过滤条件下没有有效的 TP 评级数据</p>
+      {!selSub || !currentExam ? (
+        <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
+          <p className="text-slate-400 font-bold text-lg">请在上方选择科目和考试，以生成详细名单和分析</p>
+        </div>
+      ) : studentsWithData.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
+          <p className="text-slate-400 font-bold text-lg">该考试目前还没有输入任何成绩</p>
         </div>
       ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 flex-1 overflow-auto content-start pb-4">
-            {studentsWithData.map(stu => (
-              <div key={stu.id} className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="font-extrabold text-lg text-slate-800">{stu.chineseName}</h3>
-                    <p className="text-xs text-slate-500 font-medium">{stu.malayName}</p>
-                  </div>
-                  <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold border border-indigo-100">{stu.className}</span>
-                </div>
-                
-                <div className="space-y-4">
-                  {/* 仅循环渲染此学生拥有 TP 分数的有效科目 */}
-                  {stu.activeSubjects.map(({subName, tp}) => {
-                    const widthPct = (tp / 6) * 100;
-                    return (
-                      <div key={subName} className="flex flex-col gap-1">
-                        <div className="flex justify-between text-sm font-bold">
-                          <span className="text-slate-600">{subName}</span>
-                          <span className="text-slate-800">{`TP${tp}`}</span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full ${tpColors[tp]} transition-all duration-1000 ease-out`}
-                            style={{ width: `${widthPct}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-inner">
+            <table className="w-full text-left border-collapse min-w-[900px]">
+              <thead className="sticky top-0 z-10 shadow-sm border-b border-slate-200 bg-slate-50">
+                <tr>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-24">{t.className}</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-48">姓名</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200">功课表现参考</th>
+                  <th className="py-4 px-4 font-bold text-indigo-700 border-r border-slate-200 text-center">考试得分</th>
+                  <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 text-center w-32">建议 TP</th>
+                  <th className="py-4 px-4 font-bold text-rose-700 text-center w-48">👨‍🏫 核定最终 TP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentsWithData.map(s => {
+                  return (
+                    <tr key={s.id} className="border-b border-slate-100 hover:bg-indigo-50/30 transition-colors">
+                      <td className="py-3 px-4 font-bold text-indigo-600 border-r border-slate-100">{s.className}</td>
+                      <td className="py-3 px-4 border-r border-slate-100">
+                        <div className="font-bold text-slate-800 truncate">{s.chineseName}</div>
+                        <div className="text-xs text-slate-500 font-medium truncate w-40">{s.malayName}</div>
+                      </td>
+                      <td className="py-3 px-4 border-r border-slate-100">{s.hwNode}</td>
+                      <td className="py-3 px-4 border-r border-slate-100 text-center font-mono font-bold text-lg text-slate-700">
+                        {s.examPct}%
+                      </td>
+                      <td className="py-3 px-4 border-r border-slate-100 text-center">
+                        <span className={`px-3 py-1 rounded-lg font-extrabold text-sm ${tpColorStyles[s.suggestedTP]}`}>
+                          TP {s.suggestedTP}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center bg-rose-50/20">
+                        <select
+                          value={s.finalTP}
+                          onChange={(e) => handleFinalTPChange(s.id, e.target.value)}
+                          className={`w-full px-2 py-1.5 border rounded-lg font-extrabold text-sm outline-none transition-all cursor-pointer ${s.finalTP ? 'border-rose-400 bg-rose-50 text-rose-700 focus:ring-2 focus:ring-rose-500' : 'border-slate-200 bg-white text-slate-500 focus:ring-2 focus:ring-slate-400 hover:border-slate-300'}`}
+                        >
+                          <option value="">-- 同建议TP --</option>
+                          <option value="6">🥇 确定为 TP 6</option>
+                          <option value="5">🥈 确定为 TP 5</option>
+                          <option value="4">🥉 确定为 TP 4</option>
+                          <option value="3">确定为 TP 3</option>
+                          <option value="2">确定为 TP 2</option>
+                          <option value="1">确定为 TP 1</option>
+                        </select>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
 
           {/* 底部统计表格 */}
-          <StatTable title="TP 评级分布统计 (按累计获得人次)" columns={tpCols} stats={tpStats} />
-        </>
+          <StatTable title={`TP 评级分布统计 (${currentExam.name} - 采用老师最终核定数据)`} columns={tpCols} stats={tpStats} />
+        </div>
       )}
     </div>
   );
