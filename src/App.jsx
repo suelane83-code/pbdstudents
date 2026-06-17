@@ -4,7 +4,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc } from "fireb
 import { 
   Users, BookOpen, PenTool, BarChart2, Settings, LogOut, 
   Globe, Plus, Trash2, FileText, CheckCircle, XCircle, Award,
-  Edit2, Save, X, Calendar, ClipboardList, Loader2
+  Edit2, Save, X, Calendar, ClipboardList, Loader2, Download
 } from 'lucide-react';
 
 // ==========================================
@@ -221,6 +221,11 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
   const [teacherName, setTeacherName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   
+  // Admin 登录状态
+  const [showAdminInput, setShowAdminInput] = useState(false);
+  const [adminPwd, setAdminPwd] = useState('');
+  const [adminErrorMsg, setAdminErrorMsg] = useState('');
+  
   const isNewRoom = code.length > 0 && !db.rooms[code];
 
   const handleLoginSubmit = () => {
@@ -230,6 +235,14 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
     }
     setErrorMsg('');
     onLogin(code, teacherName);
+  };
+
+  const handleAdminSubmit = () => {
+    if (adminPwd === 'XCC6027@km') {
+      onAdminLogin();
+    } else {
+      setAdminErrorMsg('Admin 密码错误！');
+    }
   };
 
   return (
@@ -275,13 +288,30 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
         </div>
       </div>
       
-      {/* 极浅的 Admin 登录入口 */}
-      <button 
-        onClick={onAdminLogin}
-        className="mt-16 text-[10px] text-slate-300 hover:text-slate-500 transition-colors tracking-widest uppercase"
-      >
-        admin
-      </button>
+      {/* Admin 登录入口与输入框 */}
+      {!showAdminInput ? (
+        <button 
+          onClick={() => setShowAdminInput(true)}
+          className="mt-16 text-[10px] text-slate-300 hover:text-slate-500 transition-colors tracking-widest uppercase"
+        >
+          admin
+        </button>
+      ) : (
+        <div className="mt-12 flex flex-col items-center gap-3 animate-in fade-in slide-in-from-bottom-2">
+          <input
+            type="password"
+            value={adminPwd}
+            onChange={(e) => {setAdminPwd(e.target.value); setAdminErrorMsg('');}}
+            placeholder="输入 Admin 密码"
+            className={`px-4 py-2 bg-white border rounded-xl text-center text-sm font-medium focus:ring-2 focus:ring-slate-400 outline-none transition-all shadow-sm ${adminErrorMsg ? 'border-red-400' : 'border-slate-200'}`}
+          />
+          <div className="flex gap-2">
+            <button onClick={handleAdminSubmit} className="px-4 py-1.5 bg-slate-800 text-white text-sm font-bold rounded-lg hover:bg-slate-700 shadow-md">登录后台</button>
+            <button onClick={() => {setShowAdminInput(false); setAdminPwd(''); setAdminErrorMsg('');}} className="px-4 py-1.5 bg-white text-slate-600 text-sm font-bold border border-slate-200 rounded-lg hover:bg-slate-50">取消</button>
+          </div>
+          {adminErrorMsg && <p className="text-xs text-red-500 font-bold">{adminErrorMsg}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -390,7 +420,7 @@ function StudentsTab({ t, data, updateData }) {
   const [importClass, setImportClass] = useState('1A');
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // 替代 window.confirm
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const handleImport = () => {
     if (!importText.trim()) return;
@@ -421,7 +451,7 @@ function StudentsTab({ t, data, updateData }) {
       setConfirmDeleteId(null);
     } else {
       setConfirmDeleteId(id);
-      setTimeout(() => setConfirmDeleteId(null), 3000); // 3秒后取消删除状态
+      setTimeout(() => setConfirmDeleteId(null), 3000);
     }
   };
 
@@ -601,7 +631,13 @@ function HomeworkTab({ t, data, updateData }) {
     if (!newHw[selSub]) newHw[selSub] = {};
     if (!newHw[selSub][dateStr]) newHw[selSub][dateStr] = {};
     
-    newHw[selSub][dateStr][studentId] = statusColor;
+    // 如果点击同一个状态，则清除（实现删除功能）
+    if (newHw[selSub][dateStr][studentId] === statusColor) {
+      delete newHw[selSub][dateStr][studentId];
+    } else {
+      newHw[selSub][dateStr][studentId] = statusColor;
+    }
+    
     updateData({ homeworks: newHw });
   };
 
@@ -612,6 +648,30 @@ function HomeworkTab({ t, data, updateData }) {
     { color: 'black', label: t.hwBlack, bg: 'bg-slate-800 hover:bg-slate-900', text: 'text-white' },
     { color: 'gray', label: t.hwGray, bg: 'bg-slate-200 hover:bg-slate-300', text: 'text-slate-600' },
   ];
+
+  // 功课导出功能
+  const exportHomeworkToCSV = () => {
+    if (!selSub || !dateStr) return;
+    const headers = ['班级', '中文姓名', '马来文姓名', `功课状态 (${dateStr})`];
+    const rows = filteredStudents.map(s => {
+      const st = data.homeworks[selSub]?.[dateStr]?.[s.id];
+      const label = statusConfig.find(sc => sc.color === st)?.label || '-';
+      return [s.className, s.chineseName, s.malayName, label].map(val => `"${val}"`).join(',');
+    });
+    
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    const fileNameClass = selClass || '所有班级';
+    link.setAttribute('download', `${fileNameClass}_${selSub}_${dateStr}_功课.csv`);
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="p-6 md:p-8 h-full flex flex-col">
@@ -627,6 +687,15 @@ function HomeworkTab({ t, data, updateData }) {
             {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <input type="date" value={dateStr} onChange={e=>setDateStr(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none"/>
+          
+          {selSub && (
+            <button 
+              onClick={exportHomeworkToCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2"
+            >
+              <Download className="w-4 h-4" /> 导出 Excel
+            </button>
+          )}
         </div>
       </div>
 
@@ -689,6 +758,8 @@ function ExamsTab({ t, data, updateData }) {
   
   const [newExamName, setNewExamName] = useState('');
   const [newExamParts, setNewExamParts] = useState('');
+  
+  const [confirmDeleteExam, setConfirmDeleteExam] = useState(false);
 
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
@@ -709,6 +780,26 @@ function ExamsTab({ t, data, updateData }) {
     setNewExamName('');
     setNewExamParts('');
     setSelExamId(newExam.id);
+  };
+
+  // 删除当前选择的考试
+  const deleteCurrentExam = () => {
+    if (confirmDeleteExam) {
+      const newConfig = { ...data.examsConfig };
+      newConfig[selSub] = newConfig[selSub].filter(e => e.id !== selExamId);
+      
+      const newRecords = { ...data.examRecords };
+      if (newRecords[selSub]) {
+        delete newRecords[selSub][currentExam.id];
+      }
+      
+      updateData({ examsConfig: newConfig, examRecords: newRecords });
+      setSelExamId('');
+      setConfirmDeleteExam(false);
+    } else {
+      setConfirmDeleteExam(true);
+      setTimeout(() => setConfirmDeleteExam(false), 3000);
+    }
   };
 
   const updateScore = (studentId, partIndex, valStr) => {
@@ -758,6 +849,49 @@ function ExamsTab({ t, data, updateData }) {
     return { raw, pct, grade, color };
   };
 
+  // 导出为 CSV 功能
+  const exportToCSV = () => {
+    if (!selSub || !currentExam) return;
+
+    // 1. 准备表头
+    const headers = ['班级', '中文姓名', '马来文姓名', ...currentExam.parts, '扣错字分', '总分(/50)', '百分比(/100)', '等级'];
+
+    // 2. 准备数据行
+    const rows = filteredStudents.map(s => {
+      const rec = data.examRecords[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
+      const gradeInfo = getGradeInfo(rec);
+
+      // 将每一列数据用引号包裹，防止名字里带逗号破坏格式
+      return [
+        s.className,
+        s.chineseName,
+        s.malayName,
+        ...rec.parts,
+        rec.deduct,
+        gradeInfo.raw,
+        `${gradeInfo.pct}%`,
+        gradeInfo.grade
+      ].map(val => `"${val}"`).join(',');
+    });
+
+    // 3. 组合并添加 UTF-8 BOM 签名（防止 Excel 中文乱码）
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+    
+    // 4. 创建文件并触发下载
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // 生成文件名 (例如: 4M_华文_年中考_成绩.csv)
+    const fileNameClass = selClass || '所有班级';
+    link.setAttribute('download', `${fileNameClass}_${selSub}_${currentExam.name}_成绩.csv`);
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="p-6 md:p-8 h-full flex flex-col">
       <div className="flex flex-wrap gap-4 items-center justify-between mb-8 border-b border-slate-100 pb-6">
@@ -776,6 +910,22 @@ function ExamsTab({ t, data, updateData }) {
               <option value="">-- 选择考试 --</option>
               {examsForSub.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
+          )}
+          {currentExam && (
+            <div className="flex gap-2 ml-2">
+              <button 
+                onClick={exportToCSV}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all"
+              >
+                <Download className="w-4 h-4" /> 导出 Excel
+              </button>
+              <button 
+                onClick={deleteCurrentExam}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${confirmDeleteExam ? 'bg-red-600 text-white shadow-md shadow-red-200' : 'bg-white text-red-500 border border-red-200 hover:bg-red-50'}`}
+              >
+                <Trash2 className="w-4 h-4" /> {confirmDeleteExam ? '确认删除?' : '删除考试'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -907,14 +1057,66 @@ function AnalysisTab({ t, data }) {
     4: 'bg-green-500', 5: 'bg-blue-500', 6: 'bg-indigo-600', 0: 'bg-slate-200'
   };
 
+  // 核心改动：自动过滤出“有输入数据的学生”以及“有数据的科目”
+  const studentsWithData = useMemo(() => {
+    return filteredStudents.map(stu => {
+      // 找出这个学生所有有成绩 (TP > 0) 的科目
+      const activeSubjects = data.subjects.map(sub => {
+        return { subName: sub, tp: calcSubjectTP(sub, stu.id) };
+      }).filter(item => item.tp > 0);
+
+      // 将有成绩的科目附加到学生对象上
+      return { ...stu, activeSubjects };
+    }).filter(stu => stu.activeSubjects.length > 0); // 如果学生没有任何科目的成绩，就不显示该学生
+  }, [filteredStudents, data.subjects, data.examsConfig, data.examRecords]);
+
+  // 导出分析页面的 Excel 数据
+  const exportAnalysisToCSV = () => {
+    if (studentsWithData.length === 0) return;
+    
+    // 表头：包含动态的所有科目名称
+    const headers = ['班级', '中文姓名', '马来文姓名', ...data.subjects];
+    
+    const rows = studentsWithData.map(s => {
+      const row = [s.className, s.chineseName, s.malayName];
+      // 对应每个科目的位置，如果有成绩填 TP，没成绩填 -
+      data.subjects.forEach(sub => {
+        const found = s.activeSubjects.find(as => as.subName === sub);
+        row.push(found && found.tp > 0 ? `TP${found.tp}` : '-');
+      });
+      return row.map(val => `"${val}"`).join(',');
+    });
+
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    link.setAttribute('download', `${selClass || '所有班级'}_TP评级分析.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="p-6 md:p-8">
-      <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-6">
+      <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4">
         <h2 className="text-2xl font-extrabold text-slate-800">{t.compareByStudent} (TP评级)</h2>
-        <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
-          <option value="">{t.allClasses}</option>
-          {classes.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div className="flex gap-3">
+          <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none">
+            <option value="">{t.allClasses}</option>
+            {classes.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {studentsWithData.length > 0 && (
+            <button 
+              onClick={exportAnalysisToCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all"
+            >
+              <Download className="w-4 h-4" /> 导出 Excel
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold">
@@ -926,41 +1128,46 @@ function AnalysisTab({ t, data }) {
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-indigo-600 rounded-full"></div>TP6 (A)</div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredStudents.map(stu => (
-          <div key={stu.id} className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="font-extrabold text-lg text-slate-800">{stu.chineseName}</h3>
-                <p className="text-xs text-slate-500 font-medium">{stu.malayName}</p>
+      {studentsWithData.length === 0 ? (
+        <div className="flex items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50 p-16">
+          <p className="text-slate-400 font-bold text-lg">当前过滤条件下没有有效的 TP 评级数据</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {studentsWithData.map(stu => (
+            <div key={stu.id} className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="font-extrabold text-lg text-slate-800">{stu.chineseName}</h3>
+                  <p className="text-xs text-slate-500 font-medium">{stu.malayName}</p>
+                </div>
+                <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold border border-indigo-100">{stu.className}</span>
               </div>
-              <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold border border-indigo-100">{stu.className}</span>
-            </div>
-            
-            <div className="space-y-4">
-              {data.subjects.map(sub => {
-                const tp = calcSubjectTP(sub, stu.id);
-                const widthPct = tp > 0 ? (tp / 6) * 100 : 0;
-                
-                return (
-                  <div key={sub} className="flex flex-col gap-1">
-                    <div className="flex justify-between text-sm font-bold">
-                      <span className="text-slate-600">{sub}</span>
-                      <span className={tp === 0 ? 'text-slate-400' : 'text-slate-800'}>{tp === 0 ? '-' : `TP${tp}`}</span>
+              
+              <div className="space-y-4">
+                {/* 仅循环渲染此学生拥有 TP 分数的有效科目 */}
+                {stu.activeSubjects.map(({subName, tp}) => {
+                  const widthPct = (tp / 6) * 100;
+                  return (
+                    <div key={subName} className="flex flex-col gap-1">
+                      <div className="flex justify-between text-sm font-bold">
+                        <span className="text-slate-600">{subName}</span>
+                        <span className="text-slate-800">{`TP${tp}`}</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full ${tpColors[tp]} transition-all duration-1000 ease-out`}
+                          style={{ width: `${widthPct}%` }}
+                        ></div>
+                      </div>
                     </div>
-                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${tpColors[tp]} transition-all duration-1000 ease-out`}
-                        style={{ width: `${widthPct}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
