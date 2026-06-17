@@ -87,7 +87,7 @@ const translations = {
 const tpColorStyles = {
   1: 'bg-red-100 text-red-700 border border-red-200',
   2: 'bg-red-100 text-red-700 border border-red-200',
-  3: 'bg-orange-100 text-orange-700 border border-orange-200',
+  3: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
   4: 'bg-green-100 text-green-700 border border-green-200',
   5: 'bg-green-100 text-green-700 border border-green-200',
   6: 'bg-green-100 text-green-700 border border-green-200'
@@ -411,11 +411,11 @@ function TeacherDashboard({ t, data, updateData }) {
       </div>
 
       <div className="flex-1 bg-white rounded-3xl shadow-sm border border-slate-100 min-h-[700px] overflow-hidden flex flex-col">
-        {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateRoomData} />}
+        {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateRoomData} />}
+        {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateRoomData} />}
+        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateRoomData} />}
+        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateRoomData} />}
       </div>
     </div>
   );
@@ -852,10 +852,10 @@ function ExamsTab({ t, data, updateData }) {
     let grade = 'F';
     let color = 'text-red-600 font-extrabold';
     if(pct >= 82) { grade = 'A'; color = 'text-green-600 font-extrabold'; }
-    else if(pct >= 66) { grade = 'B'; color = 'text-orange-500 font-extrabold'; }
-    else if(pct >= 50) { grade = 'C'; color = 'text-orange-500 font-extrabold'; }
-    else if(pct >= 35) { grade = 'D'; color = 'text-orange-500 font-extrabold'; }
-    else if(pct >= 20) { grade = 'E'; color = 'text-orange-500 font-extrabold'; }
+    else if(pct >= 66) { grade = 'B'; color = 'text-yellow-500 font-extrabold'; }
+    else if(pct >= 50) { grade = 'C'; color = 'text-yellow-500 font-extrabold'; }
+    else if(pct >= 35) { grade = 'D'; color = 'text-yellow-500 font-extrabold'; }
+    else if(pct >= 20) { grade = 'E'; color = 'text-yellow-500 font-extrabold'; }
 
     return { raw, pct, grade, color };
   };
@@ -1223,7 +1223,7 @@ function AnalysisTab({ t, data, updateData }) {
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold shrink-0">
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP1 (F)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP2 (E)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-orange-500 rounded-full"></div>TP3 (D)</div>
+        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div>TP3 (D)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP4 (C)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP5 (B)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP6 (A)</div>
