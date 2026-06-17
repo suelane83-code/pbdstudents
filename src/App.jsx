@@ -84,6 +84,7 @@ const translations = {
   }
 };
 
+// 颜色配置 (青色、黄色、红色)
 const tpColorStyles = {
   1: 'bg-red-100 text-red-700 border border-red-200',
   2: 'bg-red-100 text-red-700 border border-red-200',
@@ -110,10 +111,7 @@ export default function App() {
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         newRooms[docSnap.id] = { owner: data.owner };
-        newRoomData[docSnap.id] = data.roomData || { 
-          students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, 
-          finalTPs: {}, homeworkTitles: {} 
-        };
+        newRoomData[docSnap.id] = data.roomData || {};
       });
       setDb(prev => ({ ...prev, rooms: newRooms, roomData: newRoomData }));
       setLoadingDb(false);
@@ -134,16 +132,30 @@ export default function App() {
     return () => { unsubRooms(); unsubLogs(); };
   }, []);
 
-  const currentData = db.roomData[currentRoom] || { 
-    students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, 
-    finalTPs: {}, homeworkTitles: {} 
+  // 安全获取数据，防止读取旧数据时崩溃
+  const rawCurrentData = db.roomData[currentRoom] || {};
+  const currentData = { 
+    students: rawCurrentData.students || [], 
+    subjects: rawCurrentData.subjects || [], 
+    homeworks: rawCurrentData.homeworks || {}, 
+    examsConfig: rawCurrentData.examsConfig || {}, 
+    examRecords: rawCurrentData.examRecords || {}, 
+    finalTPs: rawCurrentData.finalTPs || {}, 
+    homeworkTitles: rawCurrentData.homeworkTitles || {} 
   };
 
   const handleLogin = async (code, teacherName) => {
     if (!code) return;
     const roomRef = doc(firestoreDb, 'rooms', code);
+    
+    // 如果是新房间，先在本地乐观更新防止转场崩溃
     if (!db.rooms[code]) {
       if (!teacherName) return; 
+      setDb(prev => ({
+        ...prev,
+        rooms: { ...prev.rooms, [code]: { owner: teacherName } },
+        roomData: { ...prev.roomData, [code]: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {}, homeworkTitles: {} } }
+      }));
       await setDoc(roomRef, {
         owner: teacherName,
         roomData: { students: [], subjects: [], homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {}, homeworkTitles: {} }
@@ -190,7 +202,7 @@ export default function App() {
           {currentRoom && authState === 'teacher' && (
             <span className="ml-4 px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-sm font-medium flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              房号: {currentRoom} ({db.rooms[currentRoom]?.owner})
+              房号: {currentRoom} ({db.rooms[currentRoom]?.owner || '加载中...'})
             </span>
           )}
         </div>
@@ -411,11 +423,11 @@ function TeacherDashboard({ t, data, updateData }) {
       </div>
 
       <div className="flex-1 bg-white rounded-3xl shadow-sm border border-slate-100 min-h-[700px] overflow-hidden flex flex-col">
-        {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateRoomData} />}
-        {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateRoomData} />}
-        {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateRoomData} />}
-        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateRoomData} />}
-        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateRoomData} />}
+        {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
       </div>
     </div>
   );
@@ -655,7 +667,7 @@ function HomeworkTab({ t, data, updateData }) {
   if (selSub) {
     filteredStudents.forEach(s => {
       const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id] || 'none';
-      const g = s.gender.toUpperCase();
+      const g = (s.gender || '').toUpperCase();
       const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
       const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
 
@@ -845,8 +857,10 @@ function ExamsTab({ t, data, updateData }) {
 
   const getGradeInfo = (rec) => {
     if(!rec) return { raw: 0, pct: 0, grade: '-', color: 'text-slate-400' };
-    const sum = rec.parts.reduce((a,b)=>a+b, 0);
-    const raw = Math.max(0, sum - rec.deduct);
+    const partsArray = rec.parts || [];
+    const deduct = rec.deduct || 0;
+    const sum = partsArray.reduce((a,b)=>a+b, 0);
+    const raw = Math.max(0, sum - deduct);
     const pct = Math.min(100, raw * 2);
     
     let grade = 'F';
@@ -866,9 +880,11 @@ function ExamsTab({ t, data, updateData }) {
     const rows = filteredStudents.map(s => {
       const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
       const gradeInfo = getGradeInfo(rec);
+      const safeParts = rec.parts || Array(currentExam.parts.length).fill(0);
+      const safeDeduct = rec.deduct || 0;
       return [
         selTerm, s.className, s.chineseName, s.malayName,
-        ...rec.parts, rec.deduct, gradeInfo.raw, `${gradeInfo.pct}%`, gradeInfo.grade
+        ...safeParts, safeDeduct, gradeInfo.raw, `${gradeInfo.pct}%`, gradeInfo.grade
       ].map(val => `"${val}"`).join(',');
     });
 
@@ -895,7 +911,7 @@ function ExamsTab({ t, data, updateData }) {
       const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id];
       const info = getGradeInfo(rec);
       if (info && info.grade !== '-') {
-        const g = s.gender.toUpperCase();
+        const g = (s.gender || '').toUpperCase();
         const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
         const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
         if (gradeStats.total[info.grade] !== undefined) {
@@ -980,8 +996,10 @@ function ExamsTab({ t, data, updateData }) {
               </thead>
               <tbody>
                 {filteredStudents.map(s => {
-                  const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
-                  const gradeInfo = getGradeInfo(data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id]);
+                  const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || {};
+                  const safeParts = rec.parts || Array(currentExam.parts.length).fill(0);
+                  const safeDeduct = rec.deduct || 0;
+                  const gradeInfo = getGradeInfo(rec);
                   
                   return (
                     <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -994,7 +1012,7 @@ function ExamsTab({ t, data, updateData }) {
                         <td key={i} className="py-2 px-1 text-center">
                           <input 
                             type="number" min="0"
-                            value={rec.parts[i] === 0 ? '' : rec.parts[i]} 
+                            value={safeParts[i] === 0 ? '' : safeParts[i]} 
                             onChange={(e)=>updateScore(s.id, i, e.target.value)}
                             className="w-16 px-2 py-1.5 border border-indigo-100 rounded bg-white text-center font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                             placeholder="0"
@@ -1004,7 +1022,7 @@ function ExamsTab({ t, data, updateData }) {
                       <td className="py-2 px-1 text-center bg-rose-50/30">
                         <input 
                           type="number" min="0"
-                          value={rec.deduct === 0 ? '' : rec.deduct} 
+                          value={safeDeduct === 0 ? '' : safeDeduct} 
                           onChange={(e)=>updateDeduct(s.id, e.target.value)}
                           className="w-16 px-2 py-1.5 border border-rose-200 rounded bg-white text-center font-bold text-rose-700 focus:ring-2 focus:ring-rose-500 outline-none"
                           placeholder="-0"
@@ -1098,9 +1116,11 @@ function AnalysisTab({ t, data, updateData }) {
     exams.forEach(ex => {
       const rec = data.examRecords?.[term]?.[subject]?.[ex.id]?.[studentId];
       if(rec) {
-        const sum = rec.parts.reduce((a,v)=>a+v, 0);
-        if(sum > 0 || rec.deduct > 0) {
-          const raw = Math.max(0, sum - rec.deduct);
+        const partsArray = rec.parts || [];
+        const deductVal = rec.deduct || 0;
+        const sum = partsArray.reduce((a,v)=>a+v, 0);
+        if(sum > 0 || deductVal > 0) {
+          const raw = Math.max(0, sum - deductVal);
           exScore += Math.min(100, raw * 2);
           exCount++;
         }
@@ -1127,10 +1147,7 @@ function AnalysisTab({ t, data, updateData }) {
   const studentsWithData = useMemo(() => {
     if (!selSub) return [];
     return classFilteredStudents.map(stu => {
-      // 获取当前选择学期的表现
       const summary = getTermSummary(selTerm, selSub, stu.id);
-      
-      // 只要他在当前选择的学期有功课/考试记录，或者老师已经为他打过最终TP，就显示出来
       const hasAnyFinalTPInTerm = data.finalTPs?.[selSub]?.[selTerm]?.[stu.id] !== undefined;
       
       if (!summary.hasData && !hasAnyFinalTPInTerm) return null;
@@ -1182,11 +1199,10 @@ function AnalysisTab({ t, data, updateData }) {
   tpCols.forEach(c => { tpStats.male[c.key]=0; tpStats.female[c.key]=0; tpStats.total[c.key]=0; });
 
   studentsWithData.forEach(s => {
-     const g = s.gender.toUpperCase();
+     const g = (s.gender || '').toUpperCase();
      const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
      const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
 
-     // 优先使用该学期老师核定的最终 TP，如果没有，才用系统的建议 TP
      const activeTP = Number(data.finalTPs?.[selSub]?.[selTerm]?.[s.id]) || s.summary.suggestedTP;
 
      if (activeTP && tpStats.total[activeTP] !== undefined) {
