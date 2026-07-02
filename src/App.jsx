@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { 
   Users, BookOpen, PenTool, BarChart2, Settings, LogOut, 
-  Globe, Plus, Trash2, FileText, CheckCircle, XCircle, Award,
+  Globe, Plus, Trash2, FileText, CheckCircle, XCircle, Flower,
   Edit2, Save, X, Calendar, ClipboardList, Loader2, Download
 } from 'lucide-react';
 
@@ -84,12 +84,12 @@ const translations = {
   }
 };
 
-// 颜色配置 (青色、黄色、红色)
+// TP 颜色配置 (TP6/5: 绿色, TP4/3: 黄色, TP2/1: 红色)
 const tpColorStyles = {
   1: 'bg-red-100 text-red-700 border border-red-200',
   2: 'bg-red-100 text-red-700 border border-red-200',
   3: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
-  4: 'bg-green-100 text-green-700 border border-green-200',
+  4: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
   5: 'bg-green-100 text-green-700 border border-green-200',
   6: 'bg-green-100 text-green-700 border border-green-200'
 };
@@ -197,7 +197,8 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans">
       <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center relative z-10">
         <div className="flex items-center gap-2">
-          <Award className="text-indigo-600 w-8 h-8" />
+          {/* 将原本的 Award 换成了 Flower */}
+          <Flower className="text-pink-500 w-8 h-8" />
           <h1 className="text-xl font-bold text-slate-800">{t.systemName}</h1>
           {currentRoom && authState === 'teacher' && (
             <span className="ml-4 px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-sm font-medium flex items-center gap-2">
@@ -1212,6 +1213,14 @@ function AnalysisTab({ t, data, updateData }) {
      }
   });
 
+  // 获取对应下拉框的配色
+  const getSelectColorClass = (tp) => {
+    if(tp === '6' || tp === '5') return 'border-green-400 bg-green-500 text-white focus:ring-green-300';
+    if(tp === '4' || tp === '3') return 'border-yellow-400 bg-yellow-500 text-white focus:ring-yellow-300';
+    if(tp === '2' || tp === '1') return 'border-red-400 bg-red-500 text-white focus:ring-red-300';
+    return '';
+  };
+
   return (
     <div className="p-6 md:p-8 flex-1 flex flex-col min-h-0">
       <div className="flex flex-wrap justify-between items-center mb-8 border-b border-slate-100 pb-6 gap-4 shrink-0">
@@ -1236,11 +1245,12 @@ function AnalysisTab({ t, data, updateData }) {
         </div>
       </div>
 
+      {/* TP 图例说明也相应更改 */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm font-bold shrink-0">
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP1 (F)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-red-500 rounded-full"></div>TP2 (E)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div>TP3 (D)</div>
-        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP4 (C)</div>
+        <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div>TP4 (C)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP5 (B)</div>
         <div className="flex items-center gap-2 text-slate-700"><div className="w-3 h-3 bg-green-500 rounded-full"></div>TP6 (A)</div>
       </div>
@@ -1307,23 +1317,27 @@ function AnalysisTab({ t, data, updateData }) {
                       {SEMESTERS.map(term => {
                         const isCurrentTerm = term === selTerm;
                         const termFinalTP = data.finalTPs?.[selSub]?.[term]?.[s.id] || '';
+                        
+                        // 动态获取颜色样式
+                        const selectedColorClass = termFinalTP ? getSelectColorClass(termFinalTP) : '';
+
                         return (
                           <td key={term} className={`py-3 px-2 text-center border-l border-slate-100 ${isCurrentTerm ? 'bg-rose-50/20' : ''}`}>
                             <select
                               value={termFinalTP}
                               onChange={(e) => handleFinalTPChange(s.id, term, e.target.value)}
                               className={`w-full px-1 py-2 border rounded-lg font-extrabold text-xs outline-none transition-all cursor-pointer shadow-sm text-center
-                                ${termFinalTP ? 'border-rose-400 bg-rose-500 text-white focus:ring-2 focus:ring-rose-300' 
+                                ${termFinalTP ? selectedColorClass 
                                 : isCurrentTerm ? 'border-rose-200 bg-white text-slate-500 focus:ring-2 focus:ring-rose-300 hover:border-rose-300' 
                                 : 'border-slate-200 bg-slate-50 text-slate-400 hover:bg-white'}`}
                             >
-                              <option value="">{isCurrentTerm ? '默认采用建议' : '未评'}</option>
-                              <option value="6">TP 6</option>
-                              <option value="5">TP 5</option>
-                              <option value="4">TP 4</option>
-                              <option value="3">TP 3</option>
-                              <option value="2">TP 2</option>
-                              <option value="1">TP 1</option>
+                              <option value="" className="text-slate-800 bg-white">{isCurrentTerm ? '默认采用建议' : '未评'}</option>
+                              <option value="6" className="text-green-700 bg-green-50 font-bold">TP 6</option>
+                              <option value="5" className="text-green-700 bg-green-50 font-bold">TP 5</option>
+                              <option value="4" className="text-yellow-700 bg-yellow-50 font-bold">TP 4</option>
+                              <option value="3" className="text-yellow-700 bg-yellow-50 font-bold">TP 3</option>
+                              <option value="2" className="text-red-700 bg-red-50 font-bold">TP 2</option>
+                              <option value="1" className="text-red-700 bg-red-50 font-bold">TP 1</option>
                             </select>
                           </td>
                         )
