@@ -94,6 +94,58 @@ const tpColorStyles = {
   6: 'bg-green-100 text-green-700 border border-green-200'
 };
 
+// ==========================================
+// 3. Excel 导出工具 (支持内联样式和颜色)
+// ==========================================
+const exportToXlsWithStyles = (htmlTable, filename) => {
+  const template = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+    <meta charset="UTF-8">
+    <style>
+      table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+      td, th { border: 1px solid #cbd5e1; padding: 8px; text-align: center; }
+      th { background-color: #f8fafc; font-weight: bold; }
+    </style>
+    </head>
+    <body>
+      ${htmlTable}
+    </body>
+    </html>
+  `;
+  const blob = new Blob([template], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename + '.xls');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+const getHwColorStyle = (status) => {
+   if (status === 'green') return 'background-color: #22c55e; color: white; font-weight: bold;';
+   if (status === 'yellow') return 'background-color: #facc15; color: #854d0e; font-weight: bold;';
+   if (status === 'red') return 'background-color: #ef4444; color: white; font-weight: bold;';
+   if (status === 'black') return 'background-color: #1e293b; color: white; font-weight: bold;';
+   if (status === 'gray') return 'background-color: #e2e8f0; color: #475569; font-weight: bold;';
+   return '';
+};
+
+const getGradeColorStyle = (grade) => {
+   if (grade === 'A') return 'background-color: #dcfce7; color: #16a34a; font-weight: bold;';
+   if (grade === 'B' || grade === 'C' || grade === 'D' || grade === 'E') return 'background-color: #fef08a; color: #ca8a04; font-weight: bold;';
+   if (grade === 'F') return 'background-color: #fee2e2; color: #dc2626; font-weight: bold;';
+   return '';
+};
+
+const getTpColorStyle = (tp) => {
+   if (tp == 6 || tp == 5) return 'background-color: #dcfce7; color: #16a34a; font-weight: bold;';
+   if (tp == 4 || tp == 3) return 'background-color: #fef08a; color: #ca8a04; font-weight: bold;';
+   if (tp == 2 || tp == 1) return 'background-color: #fee2e2; color: #dc2626; font-weight: bold;';
+   return '';
+};
+
 export default function App() {
   const [lang, setLang] = useState('zh');
   const t = translations[lang] || translations['zh'];
@@ -639,25 +691,27 @@ function HomeworkTab({ t, data, updateData }) {
     { color: 'gray', label: t.hwGray, bg: 'bg-slate-200 hover:bg-slate-300', text: 'text-slate-600' },
   ];
 
-  const exportHomeworkToCSV = () => {
+  const exportHomeworkToExcel = () => {
     if (!selSub || !dateStr) return;
     const titleStr = currentHwTitle ? ` - ${currentHwTitle}` : '';
-    const headers = ['学期', '班级', '中文姓名', '马来文姓名', `功课状态 (${dateStr}${titleStr})`];
-    const rows = filteredStudents.map(s => {
+    
+    let html = `<table><thead><tr>
+      <th>学期</th><th>班级</th><th>中文姓名</th><th>马来文姓名</th><th>功课状态 (${dateStr}${titleStr})</th>
+    </tr></thead><tbody>`;
+
+    filteredStudents.forEach(s => {
       const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
       const label = statusConfig.find(sc => sc.color === st)?.label || '-';
-      return [selTerm, s.className, s.chineseName, s.malayName, label].map(val => `"${val}"`).join(',');
+      const style = getHwColorStyle(st);
+      
+      html += `<tr>
+        <td>${selTerm}</td><td>${s.className}</td><td>${s.chineseName}</td><td>${s.malayName}</td>
+        <td style="${style}">${label}</td>
+      </tr>`;
     });
     
-    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${selTerm}_${selClass || '所有班级'}_${selSub}_${dateStr}_功课.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    html += `</tbody></table>`;
+    exportToXlsWithStyles(html, `${selTerm}_${selClass || '所有班级'}_${selSub}_${dateStr}_功课`);
   };
 
   const hwCols = statusConfig.map(sc => ({ key: sc.color, label: sc.label }));
@@ -699,8 +753,8 @@ function HomeworkTab({ t, data, updateData }) {
             </select>
             <input type="date" value={dateStr} onChange={e=>setDateStr(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none"/>
             {selSub && (
-              <button onClick={exportHomeworkToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
-                <Download className="w-4 h-4" /> 导出 Excel
+              <button onClick={exportHomeworkToExcel} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
+                <Download className="w-4 h-4" /> 导出彩色 Excel
               </button>
             )}
           </div>
@@ -875,29 +929,32 @@ function ExamsTab({ t, data, updateData }) {
     return { raw, pct, grade, color };
   };
 
-  const exportToCSV = () => {
+  const exportToExcel = () => {
     if (!selSub || !currentExam) return;
-    const headers = ['学期', '班级', '中文姓名', '马来文姓名', ...currentExam.parts, '扣错字分', '总分(/50)', '百分比(/100)', '等级'];
-    const rows = filteredStudents.map(s => {
+    
+    let html = `<table><thead><tr>
+      <th>学期</th><th>班级</th><th>中文姓名</th><th>马来文姓名</th>
+      ${currentExam.parts.map(p => `<th>${p}</th>`).join('')}
+      <th>扣错字分</th><th>总分(/50)</th><th>百分比(/100)</th><th>等级</th>
+    </tr></thead><tbody>`;
+
+    filteredStudents.forEach(s => {
       const rec = data.examRecords?.[selTerm]?.[selSub]?.[currentExam.id]?.[s.id] || { parts: Array(currentExam.parts.length).fill(0), deduct: 0 };
       const gradeInfo = getGradeInfo(rec);
       const safeParts = rec.parts || Array(currentExam.parts.length).fill(0);
       const safeDeduct = rec.deduct || 0;
-      return [
-        selTerm, s.className, s.chineseName, s.malayName,
-        ...safeParts, safeDeduct, gradeInfo.raw, `${gradeInfo.pct}%`, gradeInfo.grade
-      ].map(val => `"${val}"`).join(',');
+      const style = getGradeColorStyle(gradeInfo.grade);
+
+      html += `<tr>
+        <td>${selTerm}</td><td>${s.className}</td><td>${s.chineseName}</td><td>${s.malayName}</td>
+        ${safeParts.map(p => `<td>${p}</td>`).join('')}
+        <td>${safeDeduct}</td><td>${gradeInfo.raw}</td><td>${gradeInfo.pct}%</td>
+        <td style="${style}">${gradeInfo.grade}</td>
+      </tr>`;
     });
 
-    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${selTerm}_${selClass || '所有班级'}_${selSub}_${currentExam.name}_成绩.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    html += `</tbody></table>`;
+    exportToXlsWithStyles(html, `${selTerm}_${selClass || '所有班级'}_${selSub}_${currentExam.name}_成绩`);
   };
 
   const examCols = [
@@ -948,8 +1005,8 @@ function ExamsTab({ t, data, updateData }) {
           )}
           {currentExam && (
             <div className="flex gap-2 ml-2">
-              <button onClick={exportToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all">
-                <Download className="w-4 h-4" /> 导出 Excel
+              <button onClick={exportToExcel} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all">
+                <Download className="w-4 h-4" /> 导出彩色 Excel
               </button>
               <button onClick={deleteCurrentExam} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${confirmDeleteExam ? 'bg-red-600 text-white shadow-md shadow-red-200' : 'bg-white text-red-500 border border-red-200 hover:bg-red-50'}`}>
                 <Trash2 className="w-4 h-4" /> {confirmDeleteExam ? '确认删除?' : '删除考试'}
@@ -1129,17 +1186,35 @@ function AnalysisTab({ t, data, updateData }) {
     });
     const exPct = exCount > 0 ? Math.round(exScore / exCount) : null;
 
-    // 3. 综合评定 (功课 50% + 考试 50%)
-    let overallPct = 0;
-    if (hwPct !== null && exPct !== null) overallPct = Math.round((hwPct + exPct) / 2);
-    else if (hwPct !== null) overallPct = hwPct;
-    else if (exPct !== null) overallPct = exPct;
+    // 3. 综合评定 (功课 50% + 考试 30% + 上个学期TP 20%)
+    let prevTerm = null;
+    if (term === '第二学期') prevTerm = '第一学期';
+    if (term === '第三学期') prevTerm = '第二学期';
+    const prevTPStr = prevTerm ? data.finalTPs?.[subject]?.[prevTerm]?.[studentId] : null;
+    const prevTP = prevTPStr ? Number(prevTPStr) : null;
 
-    const suggestedTP = (hwPct === null && exPct === null) ? null : getSuggestedTP(overallPct);
+    let totalWeight = 0;
+    let totalScore = 0;
+
+    if (hwPct !== null) { totalWeight += 0.5; totalScore += hwPct * 0.5; }
+    if (exPct !== null) { totalWeight += 0.3; totalScore += exPct * 0.3; }
+    if (prevTP !== null) { 
+       const tpMap = {6:95, 5:80, 4:65, 3:50, 2:30, 1:15}; // TP 转换为基准分
+       totalWeight += 0.2; 
+       totalScore += (tpMap[prevTP] || 0) * 0.2; 
+    }
+
+    let overallPct = null;
+    if (totalWeight > 0) {
+       overallPct = Math.round(totalScore / totalWeight);
+    }
+
+    const suggestedTP = (totalWeight === 0) ? null : getSuggestedTP(overallPct);
+    const prevTPText = prevTP !== null ? `TP${prevTP}` : '-';
 
     return {
-      hasData: hwCount > 0 || exCount > 0,
-      hwPct, exPct, overallPct, suggestedTP,
+      hasData: hwCount > 0 || exCount > 0 || prevTP !== null,
+      hwPct, exPct, overallPct, suggestedTP, prevTPText,
       hwText: hwCount > 0 ? `TP${hwTP} (${hwPct}%) [${parts.join(', ')}]` : '无记录',
       hwNode
     };
@@ -1168,31 +1243,43 @@ function AnalysisTab({ t, data, updateData }) {
     updateData({ finalTPs: newFinalTPs });
   };
 
-  const exportAnalysisToCSV = () => {
+  const exportAnalysisToExcel = () => {
     if (studentsWithData.length === 0) return;
-    const headers = ['班级', '中文姓名', '马来文姓名', `${selTerm}功课综合`, `${selTerm}考试平均`, `${selTerm}系统建议TP`, '第一学期最终TP', '第二学期最终TP', '第三学期最终TP'];
-    const rows = studentsWithData.map(s => {
+
+    let html = `<table><thead><tr>
+      <th>班级</th><th>中文姓名</th><th>马来文姓名</th>
+      <th>${selTerm}功课综合 (权重50%)</th>
+      <th>${selTerm}考试平均 (权重30%)</th>
+      <th>上学期最终TP (权重20%)</th>
+      <th>${selTerm}系统建议TP (综合计算)</th>
+      <th>第一学期最终TP</th>
+      <th>第二学期最终TP</th>
+      <th>第三学期最终TP</th>
+    </tr></thead><tbody>`;
+
+    studentsWithData.forEach(s => {
       const examText = s.summary.exPct !== null ? `${s.summary.exPct}%` : '无记录';
       const suggText = s.summary.suggestedTP ? `TP${s.summary.suggestedTP} (${s.summary.overallPct}%)` : '-';
-      
-      const row = [s.className, s.chineseName, s.malayName, s.summary.hwText, examText, suggText];
-      
+      const suggStyle = getTpColorStyle(s.summary.suggestedTP);
+
+      html += `<tr>
+        <td>${s.className}</td><td>${s.chineseName}</td><td>${s.malayName}</td>
+        <td>${s.summary.hwText}</td><td>${examText}</td><td>${s.summary.prevTPText}</td>
+        <td style="${suggStyle}">${suggText}</td>
+      `;
+
       SEMESTERS.forEach(term => {
         const finalTP = data.finalTPs?.[selSub]?.[term]?.[s.id];
-        row.push(finalTP ? `TP${finalTP}` : '-');
+        const text = finalTP ? `TP${finalTP}` : '-';
+        const style = finalTP ? getTpColorStyle(finalTP) : '';
+        html += `<td style="${style}">${text}</td>`;
       });
-      return row.map(val => `"${val}"`).join(',');
+      
+      html += `</tr>`;
     });
 
-    const csvContent = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${selClass || '所有班级'}_${selSub}_全年TP评级综合分析.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    html += `</tbody></table>`;
+    exportToXlsWithStyles(html, `${selClass || '所有班级'}_${selSub}_全年TP评级综合分析`);
   };
 
   const tpCols = [6,5,4,3,2,1].map(tp => ({ key: tp.toString(), label: `TP ${tp}` }));
@@ -1238,8 +1325,8 @@ function AnalysisTab({ t, data, updateData }) {
             {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {selSub && studentsWithData.length > 0 && (
-            <button onClick={exportAnalysisToCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
-              <Download className="w-4 h-4" /> 导出分析名单
+            <button onClick={exportAnalysisToExcel} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-all ml-2">
+              <Download className="w-4 h-4" /> 导出彩色分析名单
             </button>
           )}
         </div>
@@ -1272,13 +1359,13 @@ function AnalysisTab({ t, data, updateData }) {
                   <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-24">{t.className}</th>
                   <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200 w-48">姓名</th>
                   <th className="py-4 px-4 font-bold text-slate-600 border-r border-slate-200">
-                    <div className="text-indigo-700">{selTerm}</div>功课累计表现
+                    <div className="text-indigo-700">{selTerm}</div>功课累计表现 (50%)
                   </th>
                   <th className="py-4 px-4 font-bold border-r border-slate-200 text-center w-32">
-                    <div className="text-indigo-700">{selTerm}</div>所有考试平均
+                    <div className="text-indigo-700">{selTerm}</div>所有考试平均 (30%)
                   </th>
                   <th className="py-4 px-4 font-bold border-r border-slate-200 text-center w-32 bg-slate-100">
-                    <div className="text-indigo-700">{selTerm}</div>系统建议 TP
+                    <div className="text-indigo-700">{selTerm}</div>系统建议 TP<br/><span className="text-[10px] text-slate-400 font-normal">*(含20%上学期TP)*</span>
                   </th>
                   {SEMESTERS.map(term => (
                     <th key={term} className={`py-4 px-2 font-bold text-center w-36 border-l border-slate-200 ${term === selTerm ? 'bg-rose-50 text-rose-700' : 'text-slate-500 bg-slate-50'}`}>
