@@ -800,6 +800,24 @@ function HomeworkTab({ t, data, updateData }) {
   const [selClass, setSelClass] = useState('');
   const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
 
+  const historyList = useMemo(() => {
+    if (!selTerm || !selSub) return [];
+    const hwData = data.homeworks?.[selTerm]?.[selSub] || {};
+    const titleData = data.homeworkTitles?.[selTerm]?.[selSub] || {};
+
+    // 合并所有记录过功课状态和标题的日期，并去重
+    const dates = Array.from(new Set([...Object.keys(hwData), ...Object.keys(titleData)]));
+    
+    // 按日期降序排列 (最新的在最前)
+    dates.sort((a, b) => new Date(b) - new Date(a));
+
+    // 取前 10 个，并附带对应日期的标题
+    return dates.slice(0, 10).map(d => ({
+        date: d,
+        title: titleData[d] || '未命名功课项目'
+    }));
+  }, [data.homeworks, data.homeworkTitles, selTerm, selSub]);
+
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
@@ -915,6 +933,31 @@ function HomeworkTab({ t, data, updateData }) {
               placeholder="在这里填写今日功课内容标题 (例如: 单元一练习, Buku Kerja ms 10)..."
               className="flex-1 bg-transparent border-none outline-none font-black text-slate-700 placeholder-slate-400/70 text-lg"
             />
+          </div>
+        )}
+
+        {selSub && historyList.length > 0 && (
+          <div className="w-full mt-2 bg-white/40 p-4 rounded-2xl border-2 border-white shadow-sm flex flex-col gap-3">
+             <div className="text-sm font-black text-slate-500 flex items-center gap-2 px-1">
+                <Calendar className="w-4 h-4 text-pink-400" />
+                历史记录快捷找寻 (最近 10 次)
+             </div>
+             <div className="flex gap-3 overflow-x-auto pb-2 px-1 [&::-webkit-scrollbar]:hidden">
+                {historyList.map(h => (
+                   <button
+                     key={h.date}
+                     onClick={() => setDateStr(h.date)}
+                     className={`shrink-0 px-4 py-2.5 rounded-xl border-2 text-left transition-all min-w-[140px] max-w-[200px] ${
+                        dateStr === h.date 
+                        ? 'border-pink-400 bg-pink-100 shadow-md transform scale-105 z-10' 
+                        : 'border-white bg-white/80 hover:bg-pink-50 hover:border-pink-200 hover:shadow-sm'
+                     }`}
+                   >
+                     <div className={`text-xs font-bold ${dateStr === h.date ? 'text-pink-600' : 'text-slate-400'}`}>{h.date}</div>
+                     <div className={`text-sm font-black truncate mt-0.5 ${dateStr === h.date ? 'text-pink-800' : 'text-slate-700'}`}>{h.title}</div>
+                   </button>
+                ))}
+             </div>
           </div>
         )}
       </div>
@@ -1462,7 +1505,6 @@ function AnalysisTab({ t, data, updateData }) {
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    // 可选：添加小提示
   };
 
   const exportAnalysisToExcel = () => {
@@ -1665,7 +1707,7 @@ function AnalysisTab({ t, data, updateData }) {
                         )
                       })}
                       
-                      {/* 新增评语栏 */}
+                      {/* 评语栏 */}
                       <td className="py-3 px-4 border-l-2 border-white bg-white/80 min-w-[280px]">
                         {s.summary.suggestedTP ? (
                           <div className="flex flex-col gap-2">
