@@ -16,9 +16,6 @@ import {
   bg-blue-50 bg-blue-100 bg-blue-500 bg-blue-600 text-blue-400 text-blue-500 text-blue-600 text-blue-700 text-blue-900 border-blue-50 border-blue-100 border-blue-200 border-blue-500 focus:ring-blue-200 shadow-blue-200 shadow-blue-500 from-blue-50 from-blue-500 to-blue-400
 */
 
-// ==========================================
-// 1. Firebase 配置与初始化 (支持 Canvas 环境规范)
-// ==========================================
 const userFirebaseConfig = {
   apiKey: "AIzaSyDYgQmxMcDQdnhw5IEMMdFpkff7SUN5L9M",
   authDomain: "pbd-sek-f0cbc.firebaseapp.com",
@@ -29,16 +26,11 @@ const userFirebaseConfig = {
   measurementId: "G-E4TXVG1X3Y"
 };
 
-// 优先使用环境注入的配置，否则使用用户提供的测试配置
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const firestoreDb = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// ==========================================
-// 2. 基础配置与翻译
-// ==========================================
 const SEMESTERS = ['第一学期', '第二学期', '第三学期'];
 
 const THEME_CONFIG = {
@@ -50,7 +42,6 @@ const THEME_CONFIG = {
 
 const ThemeContext = React.createContext({ tc: 'pink', icon: '🌸', changeTheme: () => {} });
 
-// 品行与态度特征配置 (+10 与 -5)
 const CONDUCT_TRAITS = {
   positive: [
     { id: 'obedient', label: '乖巧听话', score: 10, ms: 'Mendengar kata' },
@@ -171,9 +162,6 @@ const calculateGradeAndTP = (percentage) => {
   return { grade: 'F', tp: 1 };
 };
 
-// ==========================================
-// 动态漂浮背景组件
-// ==========================================
 function FloatingBackground() {
   const { icon } = useContext(ThemeContext);
   const [elements, setElements] = useState([]);
@@ -215,7 +203,6 @@ function FloatingBackground() {
   );
 }
 
-
 export default function App() {
   const [lang, setLang] = useState('zh');
   const t = translations[lang] || translations['zh'];
@@ -230,7 +217,6 @@ export default function App() {
   
   const [db, setDb] = useState({ rooms: {}, logs: [], roomData: {} });
 
-  // 1. Initialize Auth FIRST (Mandatory Canvas Firebase Rule)
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -248,13 +234,12 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch Data ONLY after Auth is successful
   useEffect(() => {
-    if (!user) return; // Guard clause
+    if (!user) return;
 
-    // Canvas environment mandatory paths for public collaborative data
-    const roomsColRef = collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms');
-    const logsColRef = collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'logs');
+    // 关键修复：还原回您最初的根目录，找回原有的9943数据
+    const roomsColRef = collection(firestoreDb, 'rooms');
+    const logsColRef = collection(firestoreDb, 'logs');
 
     const unsubRooms = onSnapshot(roomsColRef, (snapshot) => {
       const newRooms = {};
@@ -281,11 +266,10 @@ export default function App() {
     });
 
     return () => { unsubRooms(); unsubLogs(); };
-  }, [user]); // Re-run when auth state changes
+  }, [user]);
 
   const rawCurrentData = db.roomData[currentRoom] || {};
   
-  // 兼容旧版本的纯文本数据格式
   const normalizedSubjects = (rawCurrentData.subjects || []).map(s => {
     if (typeof s === 'string') return { id: s, name: s };
     return s;
@@ -310,15 +294,15 @@ export default function App() {
 
   const changeTheme = async (newThemeKey) => {
     if (currentRoom && user) {
-      const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', currentRoom);
+      const roomRef = doc(firestoreDb, 'rooms', currentRoom);
       await setDoc(roomRef, { theme: newThemeKey }, { merge: true });
     }
     setLocalTheme(newThemeKey);
   };
 
   const handleLogin = async (code, teacherName) => {
-    if (!code || !user) return; // Guard
-    const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', code);
+    if (!code || !user) return;
+    const roomRef = doc(firestoreDb, 'rooms', code);
     
     if (!db.rooms[code]) {
       if (!teacherName) return; 
@@ -335,7 +319,7 @@ export default function App() {
       });
     }
 
-    await addDoc(collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'logs'), {
+    await addDoc(collection(firestoreDb, 'logs'), {
       time: new Date().toISOString(),
       room: code,
       owner: db.rooms[code]?.owner || teacherName
@@ -354,7 +338,7 @@ export default function App() {
       ...prev,
       roomData: { ...prev.roomData, [currentRoom]: updatedData }
     }));
-    const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', currentRoom);
+    const roomRef = doc(firestoreDb, 'rooms', currentRoom);
     await setDoc(roomRef, { roomData: updatedData }, { merge: true });
   };
 
@@ -386,7 +370,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            {/* 主题选择器 */}
             <div className="flex gap-2 bg-white/50 p-1.5 rounded-full border border-white shadow-sm">
               {Object.values(THEME_CONFIG).map(themeOpt => (
                 <button 
@@ -541,7 +524,6 @@ function AdminView({ t, db }) {
   );
 }
 
-// 底部带总人数的统计表
 function StatTable({ title, columns, stats }) {
   const { tc } = useContext(ThemeContext);
   const maleTotal = columns.reduce((acc, col) => acc + (stats.male[col.key] || 0), 0);
@@ -586,7 +568,7 @@ function StatTable({ title, columns, stats }) {
 function TeacherDashboard({ t, data, updateData }) {
   const { tc } = useContext(ThemeContext);
   const [activeTab, setActiveTab] = useState('students');
-  const [currentSemester, setCurrentSemester] = useState(SEMESTERS[0]); // 新增：全局学期状态
+  const [currentSemester, setCurrentSemester] = useState('第一学期'); // 全局学期控制
 
   const tabs = [
     { id: 'students', icon: Users, label: t.students },
@@ -601,48 +583,44 @@ function TeacherDashboard({ t, data, updateData }) {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
-      <div className="w-full lg:w-56 shrink-0 flex flex-row lg:flex-col gap-3 overflow-x-auto pb-2 lg:pb-0">
-        
-        {/* 新增: 学期选择器 */}
-        <div className="mb-2 p-2 bg-white/60 backdrop-blur rounded-[1.5rem] border-2 border-white shadow-sm shrink-0">
-          <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-2 mt-1 uppercase tracking-widest flex items-center gap-1">
-             <Calendar className="w-3 h-3"/> 设定当前学期
-          </label>
-          <select 
-            value={currentSemester} 
-            onChange={e => setCurrentSemester(e.target.value)}
-            className={`w-full p-3 bg-${tc}-100 text-${tc}-800 font-black rounded-xl outline-none text-center cursor-pointer shadow-inner appearance-none transition-colors hover:bg-${tc}-200`}
-          >
-            {SEMESTERS.map(sem => <option key={sem} value={sem}>{sem}</option>)}
-          </select>
+      <div className="w-full lg:w-56 shrink-0 flex flex-col gap-3">
+        {/* 学期全局选择器 */}
+        <div className="bg-white/90 backdrop-blur rounded-[1.5rem] p-3 shadow-md border-2 border-white mb-2">
+           <label className="block text-xs font-black text-slate-500 mb-2 uppercase tracking-wider px-2">当前系统学期</label>
+           <select 
+              value={currentSemester} 
+              onChange={e => setCurrentSemester(e.target.value)}
+              className={`w-full p-2.5 bg-${tc}-50 text-${tc}-700 font-black rounded-xl border border-${tc}-100 outline-none cursor-pointer focus:ring-2 focus:ring-${tc}-200`}
+           >
+              {SEMESTERS.map(sem => <option key={sem} value={sem}>{sem}</option>)}
+           </select>
         </div>
 
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 px-5 py-4 rounded-[1.5rem] transition-all font-extrabold whitespace-nowrap ${
-                isActive 
-                  ? `bg-${tc}-500 text-white shadow-lg shadow-${tc}-200 translate-x-0 lg:translate-x-3 scale-105` 
-                  : `bg-white/80 backdrop-blur text-slate-600 hover:bg-${tc}-50 hover:text-${tc}-600 border-2 border-white`
-              }`}
-            >
-              <Icon className={`w-5 h-5 ${isActive ? 'animate-bounce' : ''}`} />
-              {tab.label}
-            </button>
-          )
-        })}
+        <div className="flex flex-row lg:flex-col gap-3 overflow-x-auto pb-2 lg:pb-0">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-3 px-5 py-4 rounded-[1.5rem] transition-all font-extrabold whitespace-nowrap ${
+                  isActive 
+                    ? `bg-${tc}-500 text-white shadow-lg shadow-${tc}-200 translate-x-0 lg:translate-x-3 scale-105` 
+                    : `bg-white/80 backdrop-blur text-slate-600 hover:bg-${tc}-50 hover:text-${tc}-600 border-2 border-white`
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'animate-bounce' : ''}`} />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="flex-1 bg-white/80 backdrop-blur rounded-[2.5rem] shadow-xl border-2 border-white min-h-[750px] overflow-hidden flex flex-col p-2 md:p-4">
-        {/* 学生与科目不受学期影响 (全局通用) */}
         {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
-        
-        {/* 以下评估类 Tab 均传入 currentSemester 以隔离数据 */}
         {activeTab === 'conduct' && <ConductTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
         {activeTab === 'homeworkEntry' && <HomeworkEntryTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
         {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} currentSemester={currentSemester} />}
@@ -662,7 +640,6 @@ function StudentsTab({ t, data, updateData }) {
   const [editForm, setEditForm] = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   
-  // 新增学生单独表单状态
   const [newStudent, setNewStudent] = useState({ className: '', stdId: '', malayName: '', chineseName: '', gender: '' });
 
   const handleImport = () => {
@@ -875,12 +852,10 @@ function ConductTab({ t, data, updateData, currentSemester }) {
   }, [classes, selectedClass]);
 
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
-
-  // 向后兼容：如果选择第一学期，使用纯 studentId 作为键；否则加上学期前缀。
-  const getConductKey = (studentId) => currentSemester === '第一学期' ? studentId : `${currentSemester}_${studentId}`;
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
 
   const toggleTrait = (studentId, traitId, type) => {
-    const conductKey = getConductKey(studentId);
+    const conductKey = `${semPrefix}${studentId}`;
     const studentConduct = data.conducts[conductKey] || { positive: [], negative: [] };
     const currentTraits = studentConduct[type] || [];
     
@@ -893,7 +868,6 @@ function ConductTab({ t, data, updateData, currentSemester }) {
 
     const newConduct = { ...studentConduct, [type]: newTraits };
     
-    // 计算总分
     let score = 0;
     newConduct.positive.forEach(id => {
       const trait = CONDUCT_TRAITS.positive.find(t => t.id === id);
@@ -911,7 +885,10 @@ function ConductTab({ t, data, updateData, currentSemester }) {
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Smile className={`text-${tc}-500`}/> {t.conduct} ({currentSemester})</h2>
+         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+            <Smile className={`text-${tc}-500`}/> {t.conduct}
+            <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+         </h2>
          <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="px-4 py-2 border-2 border-white rounded-xl outline-none font-bold bg-white/80 shadow-sm">
             {classes.map((c, idx) => <option key={c || `class-${idx}`} value={c}>{c}</option>)}
          </select>
@@ -932,7 +909,7 @@ function ConductTab({ t, data, updateData, currentSemester }) {
                 <tr><td colSpan="4" className="text-center py-12 text-slate-400 font-bold">请先选择班级或添加学生</td></tr>
               )}
               {filteredStudents.map(student => {
-                const conductKey = getConductKey(student.id);
+                const conductKey = `${semPrefix}${student.id}`;
                 const conduct = data.conducts[conductKey] || { positive: [], negative: [], score: 0 };
                 return (
                   <tr key={student.id} className={`border-b border-white hover:bg-${tc}-50/30 transition-colors`}>
@@ -998,27 +975,24 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
     if (!selectedSubject && data.subjects.length > 0) setSelectedSubject(data.subjects[0].id);
   }, [data.subjects, selectedSubject]);
 
-  // 向后兼容设计：第一学期依然使用旧Key结构
-  const hwRecordKey = currentSemester === '第一学期' 
-    ? `${selectedClass}_${selectedSubject}_${selectedDate}` 
-    : `${currentSemester}_${selectedClass}_${selectedSubject}_${selectedDate}`;
-    
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
+  const hwRecordKey = `${semPrefix}${selectedClass}_${selectedSubject}_${selectedDate}`;
   const currentRecord = data.homeworks[hwRecordKey] || {};
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
 
   const statuses = [
-    { id: 'blue', label: t.hwBlue, color: 'bg-blue-500 hover:bg-blue-600 text-white' },
-    { id: 'green', label: t.hwGreen, color: 'bg-green-500 hover:bg-green-600 text-white' },
-    { id: 'yellow', label: t.hwYellow, color: 'bg-yellow-400 hover:bg-yellow-500 text-yellow-900' },
-    { id: 'red', label: t.hwRed, color: 'bg-red-500 hover:bg-red-600 text-white' },
-    { id: 'black', label: t.hwBlack, color: 'bg-slate-800 hover:bg-slate-900 text-white' },
-    { id: 'gray', label: t.hwGray, color: 'bg-slate-300 hover:bg-slate-400 text-slate-700' }
+    { id: 'blue', label: t.hwBlue, color: 'bg-blue-500 text-white' },
+    { id: 'green', label: t.hwGreen, color: 'bg-green-500 text-white' },
+    { id: 'yellow', label: t.hwYellow, color: 'bg-yellow-400 text-yellow-900' },
+    { id: 'red', label: t.hwRed, color: 'bg-red-500 text-white' },
+    { id: 'black', label: t.hwBlack, color: 'bg-slate-800 text-white' },
+    { id: 'gray', label: t.hwGray, color: 'bg-slate-300 text-slate-700' }
   ];
 
   const markHomework = (studentId, statusId) => {
     const newRecord = { ...currentRecord };
-    if (newRecord[studentId] === statusId) {
-      delete newRecord[studentId]; // toggle off
+    if (!statusId) {
+      delete newRecord[studentId]; // 取消选择时清空记录
     } else {
       newRecord[studentId] = statusId;
     }
@@ -1039,7 +1013,10 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><PenTool className={`text-${tc}-500`}/> {t.homeworkEntry} ({currentSemester})</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
+         <PenTool className={`text-${tc}-500`}/> {t.homeworkEntry}
+         <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+       </h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end">
           <div>
@@ -1068,7 +1045,7 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
        <div className="flex gap-2 mb-4 overflow-x-auto pb-2 shrink-0">
           <span className="text-sm font-bold text-slate-600 flex items-center mr-2">批量标记:</span>
           {statuses.map(stat => (
-            <button key={stat.id} onClick={() => markAll(stat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-transform active:scale-95 shadow-sm ${stat.color}`}>
+            <button key={stat.id} onClick={() => markAll(stat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-transform active:scale-95 shadow-sm hover:opacity-90 ${stat.color}`}>
                全部 {stat.label}
             </button>
           ))}
@@ -1091,22 +1068,17 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
                          <td className="py-3 px-5 font-bold text-slate-700">
                            {student.chineseName} <br/><span className="text-xs text-slate-400">{student.malayName}</span>
                          </td>
-                         <td className="py-3 px-5">
-                            <div className="flex flex-wrap justify-center gap-2 md:gap-3">
-                               {statuses.map(stat => {
-                                  const isActive = currentRecord[student.id] === stat.id;
-                                  return (
-                                     <button 
-                                        key={stat.id} 
-                                        onClick={() => markHomework(student.id, stat.id)}
-                                        className={`w-10 h-10 md:w-12 md:h-12 rounded-full border-[3px] flex items-center justify-center transition-all ${isActive ? `${stat.color} border-white shadow-lg scale-110 ring-4 ring-${tc}-200` : 'bg-white border-slate-200 hover:border-slate-400'}`}
-                                        title={stat.label}
-                                     >
-                                        {isActive && <CheckCircle className="w-5 h-5 text-current opacity-80" />}
-                                     </button>
-                                  )
-                               })}
-                            </div>
+                         <td className="py-3 px-5 text-center">
+                            <select 
+                               value={currentRecord[student.id] || ''}
+                               onChange={(e) => markHomework(student.id, e.target.value)}
+                               className={`w-full max-w-[160px] p-2.5 rounded-xl outline-none font-bold text-center border-2 cursor-pointer transition-colors shadow-sm ${getHwSelectBgClass(currentRecord[student.id])}`}
+                            >
+                               <option value="">- 请选择 -</option>
+                               {statuses.map(stat => (
+                                  <option key={stat.id} value={stat.id}>{stat.label}</option>
+                               ))}
+                            </select>
                          </td>
                       </tr>
                    ))
@@ -1133,19 +1105,13 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
   }, [data.subjects, selectedSubject]);
   
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
   
-  // 基于学期严格过滤记录
-  const prefix = currentSemester === '第一学期' 
-    ? `${selectedClass}_${selectedSubject}_` 
-    : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
-    
-  const historyKeys = Object.keys(data.homeworks).filter(k => k.startsWith(prefix));
+  // 找出该班级和科目的所有日期记录 (按前缀过滤以区分学期)
+  const searchPrefix = `${semPrefix}${selectedClass}_${selectedSubject}_`;
+  const historyKeys = Object.keys(data.homeworks).filter(k => k.startsWith(searchPrefix));
   
-  const dates = historyKeys.map(k => {
-    const parts = k.split('_');
-    // 如果是第一学期，日期在索引2；如果是第二/三学期，带有前缀，日期在索引3
-    return currentSemester === '第一学期' ? parts.slice(2).join('_') : parts.slice(3).join('_');
-  }).sort((a,b) => new Date(b) - new Date(a)); // 倒序排列日期
+  const dates = historyKeys.map(k => k.replace(searchPrefix, '')).sort((a,b) => new Date(b) - new Date(a)); // 倒序排列日期
 
   const statusMap = {
     blue: '非常优秀', green: '达标', yellow: '还可以', red: '不达标', black: '缺席', gray: '没有做'
@@ -1153,7 +1119,10 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><History className={`text-${tc}-500`}/> {t.homeworkHistory} ({currentSemester})</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
+         <History className={`text-${tc}-500`}/> {t.homeworkHistory}
+         <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+       </h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end">
           <div>
@@ -1178,9 +1147,7 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
                    <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white min-w-[150px] sticky left-0 bg-inherit z-20">姓名</th>
                    {dates.length === 0 && <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white">无记录</th>}
                    {dates.map(date => {
-                      const key = currentSemester === '第一学期' 
-                         ? `${selectedClass}_${selectedSubject}_${date}` 
-                         : `${currentSemester}_${selectedClass}_${selectedSubject}_${date}`;
+                      const key = `${searchPrefix}${date}`;
                       const title = data.homeworkTitles[key] || '日常功课';
                       return (
                         <th key={date} className="py-2 px-3 font-extrabold text-slate-700 border-b border-white border-l text-center min-w-[100px]">
@@ -1202,9 +1169,7 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
                          </td>
                          {dates.length === 0 && <td className="py-3 px-5"></td>}
                          {dates.map(date => {
-                            const key = currentSemester === '第一学期' 
-                               ? `${selectedClass}_${selectedSubject}_${date}` 
-                               : `${currentSemester}_${selectedClass}_${selectedSubject}_${date}`;
+                            const key = `${searchPrefix}${date}`;
                             const status = data.homeworks[key]?.[student.id];
                             return (
                                <td key={date} className="py-3 px-3 border-l border-white text-center">
@@ -1238,6 +1203,16 @@ function getHwStyleObj(status) {
   return {};
 }
 
+function getHwSelectBgClass(status) {
+  if (status === 'blue') return 'bg-blue-100 text-blue-700 border-blue-300';
+  if (status === 'green') return 'bg-green-100 text-green-700 border-green-300';
+  if (status === 'yellow') return 'bg-yellow-100 text-yellow-700 border-yellow-300';
+  if (status === 'red') return 'bg-red-100 text-red-700 border-red-300';
+  if (status === 'black') return 'bg-slate-700 text-white border-slate-800';
+  if (status === 'gray') return 'bg-slate-200 text-slate-700 border-slate-300';
+  return 'bg-white border-slate-200 text-slate-500 hover:border-slate-300';
+}
+
 function SkillsTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
@@ -1253,10 +1228,9 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
     if (!selectedSubject && data.subjects.length > 0) setSelectedSubject(data.subjects[0].id);
   }, [data.subjects, selectedSubject]);
 
-  const configKey = currentSemester === '第一学期' 
-    ? `${selectedClass}_${selectedSubject}` 
-    : `${currentSemester}_${selectedClass}_${selectedSubject}`;
-    
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
+  const configKey = `${semPrefix}${selectedClass}_${selectedSubject}`;
+  
   const currentSkills = data.skillsConfig[configKey] || [];
   const records = data.skillRecords[configKey] || {};
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
@@ -1297,7 +1271,10 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Award className={`text-${tc}-500`}/> {t.skills} ({currentSemester})</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+            <Award className={`text-${tc}-500`}/> {t.skills}
+            <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+          </h2>
           <div className="flex gap-4 items-center">
              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="p-2 border border-white rounded-xl outline-none font-bold text-sm bg-white/80 shadow-sm min-w-[100px]">
                {classes.map((c, idx) => <option key={c || `class-${idx}`} value={c}>{c}</option>)}
@@ -1349,7 +1326,6 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
                    filteredStudents.map(student => {
                       const studentRecord = records[student.id] || {};
                       
-                      // 计算平均TP
                       const tpValues = currentSkills.map(s => studentRecord[s]).filter(v => v);
                       const avgTp = tpValues.length > 0 ? (tpValues.reduce((a,b)=>a+b,0) / tpValues.length).toFixed(1) : '-';
 
@@ -1398,16 +1374,14 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
     if (!selectedSubject && data.subjects.length > 0) setSelectedSubject(data.subjects[0].id);
   }, [data.subjects, selectedSubject]);
   
-  // 考试配置表单
   const [examName, setExamName] = useState('');
   const [partsInput, setPartsInput] = useState('PartA, PartB');
   const [maxTotal, setMaxTotal] = useState(50);
   
-  const prefix = currentSemester === '第一学期' 
-    ? `${selectedClass}_${selectedSubject}_` 
-    : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
-    
-  const examId = `${prefix}${examName}`;
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
+  const searchPrefix = `${semPrefix}${selectedClass}_${selectedSubject}_`;
+  const examId = `${searchPrefix}${examName}`;
+  
   const config = data.examsConfig[examId];
   const records = data.examRecords[examId] || {};
 
@@ -1438,7 +1412,6 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
       studentRecord.marks[field] = numValue;
     }
     
-    // 重新计算
     let totalMarks = 0;
     config.parts.forEach(p => {
       totalMarks += (studentRecord.marks[p] || 0);
@@ -1462,11 +1435,14 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
     });
   };
 
-  const currentExamKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(prefix));
+  const currentExamKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(searchPrefix));
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><ClipboardList className={`text-${tc}-500`}/> {t.exam} ({currentSemester})</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
+         <ClipboardList className={`text-${tc}-500`}/> {t.exam}
+         <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+       </h2>
        
        <div className="bg-white/60 p-5 rounded-3xl shadow-sm border-2 border-white mb-6 flex flex-col gap-4">
           <div className="flex flex-wrap gap-4 items-end">
@@ -1488,8 +1464,7 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
                <select value={examName} onChange={e => setExamName(e.target.value)} className="w-full p-2 border rounded-xl outline-none font-bold text-sm bg-white">
                  <option value="">-- 新建考试 --</option>
                  {currentExamKeys.map((k, idx) => {
-                   const parts = k.split('_');
-                   const name = currentSemester === '第一学期' ? parts.slice(2).join('_') : parts.slice(3).join('_');
+                   const name = k.replace(searchPrefix, '');
                    return <option key={k || `exam-${idx}`} value={name}>{name}</option>
                  })}
                </select>
@@ -1609,12 +1584,10 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
   }, [data.subjects, selectedSubject]);
   
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
+  const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
   
-  // 最终TP录入与分析逻辑，按学期隔离
-  const tpKey = currentSemester === '第一学期' 
-    ? `${selectedClass}_${selectedSubject}_final` 
-    : `${currentSemester}_${selectedClass}_${selectedSubject}_final`;
-    
+  // 最终TP录入与分析逻辑
+  const tpKey = `${semPrefix}${selectedClass}_${selectedSubject}_final`;
   const currentFinalTPs = data.finalTPs[tpKey] || {};
 
   const handleFinalTPChange = (studentId, val) => {
@@ -1642,7 +1615,7 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
   };
 
   const exportData = () => {
-    let html = `<table><tr><th colspan="7">${selectedClass} - ${selectedSubject} - ${currentSemester} 综合分析报告</th></tr>`;
+    let html = `<table><tr><th colspan="7" style="font-size:16px;">${currentSemester} - 综合分析 (${selectedClass})</th></tr>`;
     html += '<tr><th>姓名</th><th>性别</th><th>技能得分 (40%)</th><th>考试得分 (60%)</th><th>综合百分比</th><th>建议TP</th><th>最终TP</th></tr>';
     filteredStudents.forEach(s => {
        const info = getStudentAnalysisInfo(s.id);
@@ -1660,29 +1633,20 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
        </tr>`;
     });
     html += '</table>';
-    exportToXlsWithStyles(html, `综合分析_${selectedClass}_${currentSemester}`);
+    exportToXlsWithStyles(html, `${currentSemester}_综合分析_${selectedClass}`);
   };
 
-  // --------------------------------------------------------------------------
-  // 核心计算逻辑：严格抽离当前学期的 技能百分比 与 考试百分比 并加权计算。
-  // --------------------------------------------------------------------------
   const getStudentAnalysisInfo = (studentId) => {
-     // 1. 获取技能评估 (40%) - 严格读取当前学期
-     const configKey = currentSemester === '第一学期' 
-        ? `${selectedClass}_${selectedSubject}` 
-        : `${currentSemester}_${selectedClass}_${selectedSubject}`;
-        
+     // 1. 获取技能评估 (40%)
+     const configKey = `${semPrefix}${selectedClass}_${selectedSubject}`;
      const studentSkills = data.skillRecords[configKey]?.[studentId] || {};
      const skillTps = Object.values(studentSkills).map(Number).filter(n => !isNaN(n));
      const avgSkillTP = skillTps.length ? skillTps.reduce((a,b)=>a+b,0) / skillTps.length : 0;
-     const skillPct = avgSkillTP ? (avgSkillTP / 6) * 100 : 0; // 把平均TP转换为百分制
+     const skillPct = avgSkillTP ? (avgSkillTP / 6) * 100 : 0; 
 
-     // 2. 获取考试评估 (60%) - 严格读取当前学期
-     const prefix = currentSemester === '第一学期' 
-        ? `${selectedClass}_${selectedSubject}_` 
-        : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
-        
-     const examKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(prefix));
+     // 2. 获取考试评估 (60%)
+     const searchPrefix = `${semPrefix}${selectedClass}_${selectedSubject}_`;
+     const examKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(searchPrefix));
      let totalExamPct = 0;
      let examCount = 0;
      examKeys.forEach(k => {
@@ -1697,25 +1661,18 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
      // 3. 计算最终百分比与建议TP
      let finalPct = 0;
      if (skillTps.length > 0 && examCount > 0) {
-         finalPct = (skillPct * 0.4) + (examPct * 0.6); // 严格的 4/6 开
+         finalPct = (skillPct * 0.4) + (examPct * 0.6); 
      } else if (skillTps.length > 0) {
-         finalPct = skillPct; // 仅有技能数据时
+         finalPct = skillPct; 
      } else if (examCount > 0) {
-         finalPct = examPct; // 仅有考试数据时
+         finalPct = examPct; 
      }
 
      const { tp: suggestedTP, grade: suggestedGrade } = finalPct > 0 ? calculateGradeAndTP(finalPct) : { tp: '-', grade: '-' };
 
-     return {
-        skillPct,
-        examPct,
-        finalPct,
-        suggestedTP,
-        suggestedGrade
-     };
+     return { skillPct, examPct, finalPct, suggestedTP, suggestedGrade };
   };
 
-  // 计算统计数据用于 StatTable (基于老师**最终确定**的TP)
   const stats = {
     male: { tp1:0, tp2:0, tp3:0, tp4:0, tp5:0, tp6:0 },
     female: { tp1:0, tp2:0, tp3:0, tp4:0, tp5:0, tp6:0 },
@@ -1725,7 +1682,6 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
   const analysisArray = filteredStudents.map(s => {
      const info = getStudentAnalysisInfo(s.id);
      
-     // 更新统计
      const tp = currentFinalTPs[s.id];
      if (tp >= 1 && tp <= 6) {
        const key = `tp${tp}`;
@@ -1748,7 +1704,10 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><BarChart2 className={`text-${tc}-500`}/> {t.analysis} ({currentSemester})</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
+         <BarChart2 className={`text-${tc}-500`}/> {t.analysis}
+         <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
+       </h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end justify-between">
           <div className="flex gap-4">
@@ -1838,13 +1797,13 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
           </div>
 
           <div className="flex flex-col gap-6 overflow-y-auto pr-2">
-            <StatTable title={`${selectedClass} (${currentSemester}) - 最终决定 TP 统计`} columns={columns} stats={stats} />
+            <StatTable title={`${selectedClass} - 最终决定 TP 统计 (基于右上角数据)`} columns={columns} stats={stats} />
             
             <div className={`bg-${tc}-50 p-6 rounded-[2rem] border-2 border-${tc}-100 shadow-inner flex flex-col gap-3`}>
-              <h3 className="font-extrabold text-slate-700">评分机制说明 ({currentSemester})</h3>
-              <p className="text-sm font-bold text-slate-600"><strong>• 学期隔离：</strong>现在的综合建议及最终决定 TP 将仅限当前【{currentSemester}】的数据进行计算，不影响其他学期。</p>
+              <h3 className="font-extrabold text-slate-700">评分机制说明</h3>
               <p className="text-sm font-bold text-slate-600"><strong>• 技能评估 (40%)：</strong>提取「技能评估Tab」中该学生的所有TP，计算平均值后折算为 100分制。</p>
               <p className="text-sm font-bold text-slate-600"><strong>• 考试成绩 (60%)：</strong>提取「考试成绩Tab」中该学生在本科目的所有考试记录，计算其平均百分比。</p>
+              <p className="text-sm font-bold text-slate-600"><strong>• 综合百分比：</strong>(技能成绩 × 0.4) + (考试成绩 × 0.6)。如果只有其中一项，则该项占 100%。</p>
               <p className="text-sm font-bold text-blue-700"><strong>• 快捷操作：</strong>您可以点击中间的“建议TP”方块，将其直接填入右侧；或者点击上方的“采用全部建议TP”按钮一键录入。</p>
             </div>
           </div>
