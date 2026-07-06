@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useContext } from 'react';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { 
@@ -7,6 +7,14 @@ import {
   Edit2, Save, X, Calendar, ClipboardList, Loader2, Download, Smile, Copy,
   History, Clock
 } from 'lucide-react';
+
+/* 
+  Tailwind Safelist for dynamic themes:
+  bg-pink-50 bg-pink-100 bg-pink-500 bg-pink-600 text-pink-400 text-pink-500 text-pink-600 text-pink-700 text-pink-900 border-pink-50 border-pink-100 border-pink-200 border-pink-500 focus:ring-pink-200 shadow-pink-200 shadow-pink-500 from-pink-50 from-pink-500 to-pink-400
+  bg-yellow-50 bg-yellow-100 bg-yellow-500 bg-yellow-600 text-yellow-400 text-yellow-500 text-yellow-600 text-yellow-700 text-yellow-900 border-yellow-50 border-yellow-100 border-yellow-200 border-yellow-500 focus:ring-yellow-200 shadow-yellow-200 shadow-yellow-500 from-yellow-50 from-yellow-500 to-yellow-400
+  bg-purple-50 bg-purple-100 bg-purple-500 bg-purple-600 text-purple-400 text-purple-500 text-purple-600 text-purple-700 text-purple-900 border-purple-50 border-purple-100 border-purple-200 border-purple-500 focus:ring-purple-200 shadow-purple-200 shadow-purple-500 from-purple-50 from-purple-500 to-purple-400
+  bg-blue-50 bg-blue-100 bg-blue-500 bg-blue-600 text-blue-400 text-blue-500 text-blue-600 text-blue-700 text-blue-900 border-blue-50 border-blue-100 border-blue-200 border-blue-500 focus:ring-blue-200 shadow-blue-200 shadow-blue-500 from-blue-50 from-blue-500 to-blue-400
+*/
 
 // ==========================================
 // 1. 你的专属 Firebase 配置
@@ -28,6 +36,15 @@ const firestoreDb = getFirestore(app);
 // 2. 基础配置与翻译
 // ==========================================
 const SEMESTERS = ['第一学期', '第二学期', '第三学期'];
+
+const THEME_CONFIG = {
+  pink: { color: 'pink', icon: '🌸', name: '樱花粉' },
+  yellow: { color: 'yellow', icon: '🌻', name: '向日葵黄' },
+  purple: { color: 'purple', icon: '🪻', name: '薰衣草紫' },
+  blue: { color: 'blue', icon: '💠', name: '绣球蓝' }
+};
+
+const ThemeContext = React.createContext({ tc: 'pink', icon: '🌸', changeTheme: () => {} });
 
 // 品行与态度特征配置 (+10 与 -5)
 const CONDUCT_TRAITS = {
@@ -58,8 +75,8 @@ const translations = {
     students: '学生管理',
     subjects: '科目管理',
     conduct: '品行态度',
-    homework: '功课登记', // 更改了名字
-    homeworkHistory: '功课历史', // 新增翻译
+    homeworkEntry: '功课登记',
+    homeworkHistory: '功课历史',
     exam: '考试成绩',
     analysis: '分析 & TP',
     adminPanel: '管理后台',
@@ -105,7 +122,6 @@ const translations = {
   }
 };
 
-// TP 颜色配置 (TP6/5: 绿色, TP4/3: 黄色, TP2/1: 红色)
 const tpColorStyles = {
   1: 'bg-red-100 text-red-700 border border-red-200',
   2: 'bg-red-100 text-red-700 border border-red-200',
@@ -115,9 +131,6 @@ const tpColorStyles = {
   6: 'bg-green-100 text-green-700 border border-green-200'
 };
 
-// ==========================================
-// 3. Excel 导出工具 (支持内联样式和颜色)
-// ==========================================
 const exportToXlsWithStyles = (htmlTable, filename) => {
   const template = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -168,15 +181,50 @@ const getTpColorStyle = (tp) => {
    return '';
 };
 
-// 终极功课评价配置：非常优秀、达标、还可以、不达标、缺席、没有做
-const statusConfig = [
-  { color: 'blue', label: '非常优秀', bg: 'bg-blue-500 hover:bg-blue-600', text: 'text-white' },
-  { color: 'green', label: '达标', bg: 'bg-green-500 hover:bg-green-600', text: 'text-white' },
-  { color: 'yellow', label: '还可以', bg: 'bg-yellow-400 hover:bg-yellow-500', text: 'text-yellow-900' },
-  { color: 'red', label: '不达标', bg: 'bg-rose-500 hover:bg-rose-600', text: 'text-white' },
-  { color: 'black', label: '缺席', bg: 'bg-slate-800 hover:bg-slate-900', text: 'text-white' },
-  { color: 'gray', label: '没有做', bg: 'bg-slate-300 hover:bg-slate-400', text: 'text-slate-700' },
-];
+// ==========================================
+// 动态漂浮背景组件
+// ==========================================
+function FloatingBackground() {
+  const { icon } = useContext(ThemeContext);
+  const [elements, setElements] = useState([]);
+
+  useEffect(() => {
+    const arr = Array.from({ length: 18 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      delay: Math.random() * 20,
+      duration: 12 + Math.random() * 20,
+      size: 1 + Math.random() * 2,
+    }));
+    setElements(arr);
+  }, [icon]);
+
+  return (
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-[0]">
+      <style>{`
+        @keyframes floatUp {
+          0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
+          10% { opacity: 0.6; }
+          90% { opacity: 0.6; }
+          100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
+        }
+      `}</style>
+      {elements.map(el => (
+        <div key={el.id} className="absolute" style={{
+          left: `${el.left}%`,
+          bottom: '-10%',
+          animation: `floatUp ${el.duration}s linear ${el.delay}s infinite`,
+          fontSize: `${el.size}rem`,
+          opacity: 0,
+          filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.1))'
+        }}>
+          {icon}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 export default function App() {
   const [lang, setLang] = useState('zh');
@@ -185,6 +233,7 @@ export default function App() {
   const [authState, setAuthState] = useState('login');
   const [currentRoom, setCurrentRoom] = useState('');
   const [loadingDb, setLoadingDb] = useState(true);
+  const [localTheme, setLocalTheme] = useState('pink');
   
   const [db, setDb] = useState({ rooms: {}, logs: [], roomData: {} });
 
@@ -194,7 +243,7 @@ export default function App() {
       const newRoomData = {};
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        newRooms[docSnap.id] = { owner: data.owner };
+        newRooms[docSnap.id] = { owner: data.owner, theme: data.theme || 'pink' };
         newRoomData[docSnap.id] = data.roomData || {};
       });
       setDb(prev => ({ ...prev, rooms: newRooms, roomData: newRoomData }));
@@ -216,17 +265,29 @@ export default function App() {
     return () => { unsubRooms(); unsubLogs(); };
   }, []);
 
-  // 安全获取数据
   const rawCurrentData = db.roomData[currentRoom] || {};
   const currentData = { 
     students: rawCurrentData.students || [], 
     subjects: rawCurrentData.subjects || [], 
-    conducts: rawCurrentData.conducts || {}, // 品行记录
+    conducts: rawCurrentData.conducts || {}, 
     homeworks: rawCurrentData.homeworks || {}, 
     examsConfig: rawCurrentData.examsConfig || {}, 
     examRecords: rawCurrentData.examRecords || {}, 
     finalTPs: rawCurrentData.finalTPs || {}, 
     homeworkTitles: rawCurrentData.homeworkTitles || {} 
+  };
+
+  // 获取当前房间的主题，没有进入房间则使用本地预览主题
+  const activeThemeKey = (currentRoom && db.rooms[currentRoom]?.theme) ? db.rooms[currentRoom].theme : localTheme;
+  const currentThemeConfig = THEME_CONFIG[activeThemeKey] || THEME_CONFIG['pink'];
+  const tc = currentThemeConfig.color;
+
+  const changeTheme = async (newThemeKey) => {
+    if (currentRoom) {
+      const roomRef = doc(firestoreDb, 'rooms', currentRoom);
+      await setDoc(roomRef, { theme: newThemeKey }, { merge: true });
+    }
+    setLocalTheme(newThemeKey);
   };
 
   const handleLogin = async (code, teacherName) => {
@@ -237,11 +298,12 @@ export default function App() {
       if (!teacherName) return; 
       setDb(prev => ({
         ...prev,
-        rooms: { ...prev.rooms, [code]: { owner: teacherName } },
+        rooms: { ...prev.rooms, [code]: { owner: teacherName, theme: localTheme } },
         roomData: { ...prev.roomData, [code]: { students: [], subjects: [], conducts: {}, homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {}, homeworkTitles: {} } }
       }));
       await setDoc(roomRef, {
         owner: teacherName,
+        theme: localTheme,
         roomData: { students: [], subjects: [], conducts: {}, homeworks: {}, examsConfig: {}, examRecords: {}, finalTPs: {}, homeworkTitles: {} }
       });
     }
@@ -270,47 +332,66 @@ export default function App() {
 
   if (loadingDb) {
     return (
-      <div className="min-h-screen bg-pink-50 flex flex-col items-center justify-center relative overflow-hidden">
-        <Flower className="w-16 h-16 text-pink-400 animate-spin-slow mb-4 opacity-50 absolute" />
-        <Loader2 className="w-10 h-10 text-pink-600 animate-spin mb-4 relative z-10" />
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center relative overflow-hidden">
+        <Loader2 className="w-10 h-10 text-slate-400 animate-spin mb-4 relative z-10" />
         <h2 className="text-xl font-bold text-slate-700 relative z-10">萌花系统加载中...</h2>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-white text-slate-800 font-sans relative overflow-x-hidden">
-      <header className="bg-white/80 backdrop-blur-md shadow-sm px-6 py-4 flex justify-between items-center relative z-20 border-b border-pink-100">
-        <div className="flex items-center gap-2">
-          <Flower className="text-pink-500 w-8 h-8" />
-          <h1 className="text-xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400 tracking-wide">{t.systemName}</h1>
-          {currentRoom && authState === 'teacher' && (
-            <span className="ml-4 px-4 py-1.5 bg-pink-50 text-pink-700 border border-pink-200 rounded-full text-sm font-bold flex items-center gap-2 shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              房号: {currentRoom} ({db.rooms[currentRoom]?.owner || '加载中...'})
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          {authState !== 'login' && (
-            <button onClick={() => {setAuthState('login'); setCurrentRoom('');}} className="flex items-center gap-1 text-slate-500 hover:text-red-500 transition px-4 py-2 rounded-xl hover:bg-red-50 font-bold">
-              <LogOut className="w-4 h-4" />
-              <span>{t.logout}</span>
-            </button>
-          )}
-        </div>
-      </header>
+    <ThemeContext.Provider value={{ tc, icon: currentThemeConfig.icon, changeTheme }}>
+      <div className={`min-h-screen bg-gradient-to-br from-${tc}-50 to-white text-slate-800 font-sans relative overflow-x-hidden transition-colors duration-500`}>
+        <FloatingBackground />
+        
+        <header className={`bg-white/70 backdrop-blur-md shadow-sm px-6 py-4 flex flex-col md:flex-row justify-between items-center relative z-20 border-b border-${tc}-100 gap-4`}>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{currentThemeConfig.icon}</span>
+            <h1 className={`text-xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-${tc}-500 to-${tc}-400 tracking-wide`}>{t.systemName}</h1>
+            {currentRoom && authState === 'teacher' && (
+              <span className={`ml-4 px-4 py-1.5 bg-${tc}-50 text-${tc}-700 border border-${tc}-200 rounded-full text-sm font-bold flex items-center gap-2 shadow-inner`}>
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                房号: {currentRoom} ({db.rooms[currentRoom]?.owner || '加载中...'})
+              </span>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {/* 主题选择器 */}
+            <div className="flex gap-2 bg-white/50 p-1.5 rounded-full border border-white shadow-sm">
+              {Object.values(THEME_CONFIG).map(themeOpt => (
+                <button 
+                  key={themeOpt.color} 
+                  onClick={() => changeTheme(themeOpt.color)}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-lg transition-transform ${tc === themeOpt.color ? 'scale-125 shadow-md bg-white' : 'hover:scale-110 opacity-70 grayscale'}`}
+                  title={themeOpt.name}
+                >
+                  {themeOpt.icon}
+                </button>
+              ))}
+            </div>
 
-      <main className="p-4 md:p-6 max-w-[1500px] mx-auto relative z-10">
-        {authState === 'login' && <LoginView t={t} db={db} onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
-        {authState === 'admin' && <AdminView t={t} db={db} />}
-        {authState === 'teacher' && <TeacherDashboard t={t} data={currentData} updateData={updateRoomData} />}
-      </main>
-    </div>
+            {authState !== 'login' && (
+              <button onClick={() => {setAuthState('login'); setCurrentRoom('');}} className="flex items-center gap-1 text-slate-500 hover:text-red-500 transition px-4 py-2 rounded-xl hover:bg-red-50 font-bold bg-white/80">
+                <LogOut className="w-4 h-4" />
+                <span>{t.logout}</span>
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main className="p-4 md:p-6 max-w-[1500px] mx-auto relative z-10">
+          {authState === 'login' && <LoginView t={t} db={db} onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
+          {authState === 'admin' && <AdminView t={t} db={db} />}
+          {authState === 'teacher' && <TeacherDashboard t={t} data={currentData} updateData={updateRoomData} />}
+        </main>
+      </div>
+    </ThemeContext.Provider>
   );
 }
 
 function LoginView({ t, db, onLogin, onAdminLogin }) {
+  const { tc } = useContext(ThemeContext);
   const [code, setCode] = useState('');
   const [teacherName, setTeacherName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -339,27 +420,27 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
 
   return (
     <div className="flex flex-col items-center justify-center mt-20">
-      <div className="bg-white/80 backdrop-blur p-8 rounded-3xl shadow-xl shadow-pink-200/50 w-full md:w-96 border-2 border-pink-100">
+      <div className={`bg-white/80 backdrop-blur p-8 rounded-3xl shadow-xl shadow-${tc}-200/50 w-full md:w-96 border-2 border-${tc}-100 transition-colors duration-500`}>
         <div className="flex items-center justify-center gap-3 mb-8">
-          <Users className="w-8 h-8 text-pink-500" />
+          <Users className={`w-8 h-8 text-${tc}-500`} />
           <h2 className="text-2xl font-extrabold text-slate-800">{t.login}</h2>
         </div>
         
         <div className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5">{t.roomCode}</label>
-            <input type="text" value={code} onChange={(e) => {setCode(e.target.value); setErrorMsg('');}} className="w-full px-4 py-3 bg-white/50 border-2 border-pink-100 rounded-2xl focus:ring-4 focus:ring-pink-200 focus:bg-white outline-none transition-all font-bold text-slate-700" placeholder="输入房号进入或创建" />
+            <input type="text" value={code} onChange={(e) => {setCode(e.target.value); setErrorMsg('');}} className={`w-full px-4 py-3 bg-white/50 border-2 border-${tc}-100 rounded-2xl focus:ring-4 focus:ring-${tc}-200 focus:bg-white outline-none transition-all font-bold text-slate-700`} placeholder="输入房号进入或创建" />
           </div>
           
           {isNewRoom && (
             <div className="animate-in fade-in slide-in-from-top-2">
-              <label className="block text-sm font-bold text-emerald-600 mb-1.5">🌸 检测到新房号，{t.teacherName}</label>
+              <label className="block text-sm font-bold text-emerald-600 mb-1.5">检测到新房号，{t.teacherName}</label>
               <input type="text" value={teacherName} onChange={(e) => {setTeacherName(e.target.value); setErrorMsg('');}} className={`w-full px-4 py-3 bg-emerald-50/50 border-2 rounded-2xl focus:ring-4 focus:ring-emerald-200 focus:bg-white outline-none transition-all font-bold text-slate-700 ${errorMsg ? 'border-red-400' : 'border-emerald-200'}`} placeholder="例如: 林老师 (Mr. Lim)" />
               {errorMsg && <p className="text-xs text-red-500 font-bold mt-2">{errorMsg}</p>}
             </div>
           )}
 
-          <button onClick={handleLoginSubmit} className="w-full bg-gradient-to-r from-pink-500 to-rose-400 text-white py-3.5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all font-extrabold text-lg shadow-lg shadow-pink-200 mt-4">
+          <button onClick={handleLoginSubmit} className={`w-full bg-gradient-to-r from-${tc}-500 to-${tc}-400 text-white py-3.5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all font-extrabold text-lg shadow-lg shadow-${tc}-200 mt-4`}>
             {isNewRoom ? t.createRoom : t.enterRoom}
           </button>
         </div>
@@ -384,6 +465,7 @@ function LoginView({ t, db, onLogin, onAdminLogin }) {
 }
 
 function AdminView({ t, db }) {
+  const { tc } = useContext(ThemeContext);
   const formatDate = (isoString) => {
     try {
       const d = new Date(isoString);
@@ -401,12 +483,12 @@ function AdminView({ t, db }) {
             {Object.entries(db.rooms).map(([code, info]) => (
               <li key={code} className="px-5 py-4 bg-white rounded-2xl border border-slate-100 flex flex-col shadow-sm">
                 <div className="flex justify-between items-center mb-1">
-                  <span className="font-mono text-pink-600 font-black text-xl">{code}</span>
+                  <span className={`font-mono text-${tc}-600 font-black text-xl`}>{code}</span>
                   <span className="px-3 py-1 bg-slate-50 rounded-lg text-xs font-bold text-slate-500 border">
                     {db.roomData[code]?.students?.length || 0} 学生
                   </span>
                 </div>
-                <span className="text-sm text-slate-600 font-bold">老师: {info.owner}</span>
+                <span className="text-sm text-slate-600 font-bold">老师: {info.owner} <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full ml-2">Theme: {info.theme || 'pink'}</span></span>
               </li>
             ))}
           </ul>
@@ -417,7 +499,7 @@ function AdminView({ t, db }) {
             {db.logs.map((log) => (
               <li key={log.id} className="text-sm flex flex-col bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
                 <div className="flex justify-between mb-1">
-                  <span className="font-mono text-pink-600 font-bold">{log.room}</span>
+                  <span className={`font-mono text-${tc}-600 font-bold`}>{log.room}</span>
                   <span className="text-xs text-slate-400 font-bold">{formatDate(log.time)}</span>
                 </div>
                 <span className="text-slate-600 font-bold">登入者: {log.owner}</span>
@@ -432,37 +514,38 @@ function AdminView({ t, db }) {
 
 // 底部带总人数的统计表
 function StatTable({ title, columns, stats }) {
+  const { tc } = useContext(ThemeContext);
   const maleTotal = columns.reduce((acc, col) => acc + (stats.male[col.key] || 0), 0);
   const femaleTotal = columns.reduce((acc, col) => acc + (stats.female[col.key] || 0), 0);
   const grandTotal = maleTotal + femaleTotal;
 
   return (
-    <div className="mt-6 bg-white p-5 rounded-3xl border border-pink-100 shadow-sm shrink-0">
+    <div className={`mt-6 bg-white p-5 rounded-3xl border border-${tc}-100 shadow-sm shrink-0 transition-colors duration-500`}>
       <h3 className="text-md font-extrabold text-slate-800 mb-4">{title}</h3>
       <div className="overflow-x-auto">
         <table className="w-full text-center border-collapse text-sm">
           <thead>
-            <tr className="bg-pink-50/50 border-b border-pink-100">
-              <th className="py-3 px-4 font-bold text-slate-600 border-r border-pink-100 text-left rounded-tl-xl">性别</th>
+            <tr className={`bg-${tc}-50 border-b border-${tc}-100`}>
+              <th className={`py-3 px-4 font-bold text-slate-600 border-r border-${tc}-100 text-left rounded-tl-xl`}>性别</th>
               {columns.map(col => <th key={col.key} className="py-3 px-3 font-bold text-slate-600">{col.label}</th>)}
-              <th className="py-3 px-4 font-extrabold text-pink-700 border-l border-pink-100 bg-pink-100/50 rounded-tr-xl">合计人数</th>
+              <th className={`py-3 px-4 font-extrabold text-${tc}-700 border-l border-${tc}-100 bg-${tc}-100 rounded-tr-xl`}>合计人数</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-pink-50 hover:bg-slate-50">
-              <td className="py-3 px-4 font-bold text-blue-600 border-r border-pink-50 text-left">男生 (L)</td>
+            <tr className={`border-b border-${tc}-50 hover:bg-slate-50`}>
+              <td className={`py-3 px-4 font-bold text-blue-600 border-r border-${tc}-50 text-left`}>男生 (L)</td>
               {columns.map(col => <td key={col.key} className="py-3 px-3 text-slate-700 font-bold">{stats.male[col.key]}</td>)}
-              <td className="py-3 px-4 font-bold text-blue-700 border-l border-pink-50 bg-pink-50/30">{maleTotal}</td>
+              <td className={`py-3 px-4 font-bold text-blue-700 border-l border-${tc}-50 bg-${tc}-50/50`}>{maleTotal}</td>
             </tr>
-            <tr className="border-b border-pink-50 hover:bg-slate-50">
-              <td className="py-3 px-4 font-bold text-pink-600 border-r border-pink-50 text-left">女生 (P)</td>
+            <tr className={`border-b border-${tc}-50 hover:bg-slate-50`}>
+              <td className={`py-3 px-4 font-bold text-pink-600 border-r border-${tc}-50 text-left`}>女生 (P)</td>
               {columns.map(col => <td key={col.key} className="py-3 px-3 text-slate-700 font-bold">{stats.female[col.key]}</td>)}
-              <td className="py-3 px-4 font-bold text-pink-700 border-l border-pink-50 bg-pink-50/30">{femaleTotal}</td>
+              <td className={`py-3 px-4 font-bold text-pink-700 border-l border-${tc}-50 bg-${tc}-50/50`}>{femaleTotal}</td>
             </tr>
-            <tr className="bg-pink-50/30">
-              <td className="py-3 px-4 font-extrabold text-slate-800 border-r border-pink-100 text-left rounded-bl-xl">横向总计</td>
+            <tr className={`bg-${tc}-50/50`}>
+              <td className={`py-3 px-4 font-extrabold text-slate-800 border-r border-${tc}-100 text-left rounded-bl-xl`}>横向总计</td>
               {columns.map(col => <td key={col.key} className="py-3 px-3 font-extrabold text-slate-800">{stats.total[col.key]}</td>)}
-              <td className="py-3 px-4 font-black text-pink-700 border-l border-pink-100 bg-pink-100/50 text-lg rounded-br-xl">{grandTotal}</td>
+              <td className={`py-3 px-4 font-black text-${tc}-700 border-l border-${tc}-100 bg-${tc}-100 text-lg rounded-br-xl`}>{grandTotal}</td>
             </tr>
           </tbody>
         </table>
@@ -472,14 +555,15 @@ function StatTable({ title, columns, stats }) {
 }
 
 function TeacherDashboard({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [activeTab, setActiveTab] = useState('students');
 
   const tabs = [
     { id: 'students', icon: Users, label: t.students },
     { id: 'subjects', icon: BookOpen, label: t.subjects },
     { id: 'conduct', icon: Smile, label: t.conduct },
-    { id: 'homework', icon: PenTool, label: t.homework }, // 修改图标
-    { id: 'homeworkHistory', icon: History, label: t.homeworkHistory }, // 新增的 Tab
+    { id: 'homeworkEntry', icon: PenTool, label: t.homeworkEntry },
+    { id: 'homeworkHistory', icon: History, label: t.homeworkHistory },
     { id: 'exams', icon: ClipboardList, label: t.exam },
     { id: 'analysis', icon: BarChart2, label: t.analysis },
   ];
@@ -496,8 +580,8 @@ function TeacherDashboard({ t, data, updateData }) {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-3 px-5 py-4 rounded-[1.5rem] transition-all font-extrabold whitespace-nowrap ${
                 isActive 
-                  ? 'bg-pink-500 text-white shadow-lg shadow-pink-200 translate-x-0 lg:translate-x-3 scale-105' 
-                  : 'bg-white/80 backdrop-blur text-slate-600 hover:bg-pink-50 hover:text-pink-600 border-2 border-white'
+                  ? `bg-${tc}-500 text-white shadow-lg shadow-${tc}-200 translate-x-0 lg:translate-x-3 scale-105` 
+                  : `bg-white/80 backdrop-blur text-slate-600 hover:bg-${tc}-50 hover:text-${tc}-600 border-2 border-white`
               }`}
             >
               <Icon className={`w-5 h-5 ${isActive ? 'animate-bounce' : ''}`} />
@@ -511,8 +595,8 @@ function TeacherDashboard({ t, data, updateData }) {
         {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'conduct' && <ConductTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} />} {/* 新增路由 */}
+        {activeTab === 'homeworkEntry' && <HomeworkEntryTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} />}
         {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
       </div>
@@ -521,6 +605,7 @@ function TeacherDashboard({ t, data, updateData }) {
 }
 
 function StudentsTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [importText, setImportText] = useState('');
   const [importClass, setImportClass] = useState('1A');
   const [editingId, setEditingId] = useState(null);
@@ -572,12 +657,12 @@ function StudentsTab({ t, data, updateData }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-      <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><Users className="text-pink-500"/> {t.students}</h2>
+      <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><Users className={`text-${tc}-500`}/> {t.students}</h2>
       
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 min-h-0">
         <div className="xl:col-span-2 overflow-y-auto border-2 border-white rounded-[2rem] bg-white/60 relative shadow-inner">
           <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+            <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors duration-500`}>
               <tr>
                 <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white">{t.className}</th>
                 <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white">{t.studentId}</th>
@@ -592,9 +677,9 @@ function StudentsTab({ t, data, updateData }) {
                 <tr><td colSpan="6" className="text-center py-12 text-slate-400 font-bold">{t.noData}</td></tr>
               )}
               {data.students.map(s => (
-                <tr key={s.id} className="border-b border-white hover:bg-pink-50/50 transition-colors group">
+                <tr key={s.id} className={`border-b border-white hover:bg-${tc}-50/50 transition-colors group`}>
                   {editingId === s.id ? (
-                    <td colSpan="6" className="p-3 bg-pink-50/50">
+                    <td colSpan="6" className={`p-3 bg-${tc}-50/50`}>
                       <div className="flex gap-2 items-center">
                         <input className="w-16 p-2 border-2 rounded-xl outline-none font-bold" value={editForm.className} onChange={e=>setEditForm({...editForm, className: e.target.value})} />
                         <input className="w-20 p-2 border-2 rounded-xl outline-none font-bold" value={editForm.stdId} onChange={e=>setEditForm({...editForm, stdId: e.target.value})} />
@@ -607,13 +692,13 @@ function StudentsTab({ t, data, updateData }) {
                     </td>
                   ) : (
                     <>
-                      <td className="py-3 px-5 font-black text-pink-600">{s.className}</td>
+                      <td className={`py-3 px-5 font-black text-${tc}-600`}>{s.className}</td>
                       <td className="py-3 px-5 font-mono text-sm font-bold text-slate-500">{s.stdId}</td>
                       <td className="py-3 px-5 font-bold text-slate-700">{s.malayName}</td>
                       <td className="py-3 px-5 font-bold text-slate-700">{s.chineseName}</td>
                       <td className="py-3 px-5 text-slate-500 font-bold">{s.gender}</td>
                       <td className="py-3 px-5 flex gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => startEdit(s)} className="p-2 text-pink-500 bg-pink-50 hover:bg-pink-500 hover:text-white rounded-xl transition-all shadow-sm">
+                        <button onClick={() => startEdit(s)} className={`p-2 text-${tc}-500 bg-${tc}-50 hover:bg-${tc}-500 hover:text-white rounded-xl transition-all shadow-sm`}>
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button onClick={() => removeStudent(s.id)} className={`p-2 rounded-xl text-sm font-bold transition-all shadow-sm ${confirmDeleteId === s.id ? 'bg-red-500 text-white px-3' : 'bg-white text-red-500 hover:bg-red-500 hover:text-white'}`}>
@@ -628,20 +713,20 @@ function StudentsTab({ t, data, updateData }) {
           </table>
         </div>
 
-        <div className="bg-pink-50/60 p-6 rounded-[2rem] border-2 border-pink-100 h-fit shadow-sm">
-          <h3 className="font-black text-pink-700 mb-4 flex items-center gap-2">
+        <div className={`bg-${tc}-50/60 p-6 rounded-[2rem] border-2 border-${tc}-100 h-fit shadow-sm transition-colors duration-500`}>
+          <h3 className={`font-black text-${tc}-700 mb-4 flex items-center gap-2`}>
             <FileText className="w-5 h-5" /> {t.batchImport}
           </h3>
           <div className="mb-4">
-            <label className="block text-sm font-bold text-pink-600 mb-2">{t.targetClass}</label>
-            <input type="text" value={importClass} onChange={e => setImportClass(e.target.value)} className="w-full px-4 py-3 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-pink-200 font-bold text-slate-700 shadow-inner" placeholder="e.g. 1A, 2B" />
+            <label className={`block text-sm font-bold text-${tc}-600 mb-2`}>{t.targetClass}</label>
+            <input type="text" value={importClass} onChange={e => setImportClass(e.target.value)} className={`w-full px-4 py-3 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-${tc}-200 font-bold text-slate-700 shadow-inner`} placeholder="e.g. 1A, 2B" />
           </div>
-          <p className="text-xs text-pink-600/70 mb-2 font-bold">{t.importDesc}</p>
-          <p className="text-xs font-mono font-bold text-slate-500 bg-white/80 p-3 rounded-xl border border-pink-100 mb-4 shadow-inner">
+          <p className={`text-xs text-${tc}-600/70 mb-2 font-bold`}>{t.importDesc}</p>
+          <p className={`text-xs font-mono font-bold text-slate-500 bg-white/80 p-3 rounded-xl border border-${tc}-100 mb-4 shadow-inner`}>
             A001, Ali bin Abu, 阿里, L<br/>A002, Siti Nurhaliza, 茜蒂, P
           </p>
-          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="w-full h-32 p-4 border-2 border-white rounded-2xl text-sm font-bold focus:ring-4 focus:ring-pink-200 outline-none mb-4 resize-none shadow-inner bg-white/80" placeholder="在此处粘贴 Excel 内容..." />
-          <button onClick={handleImport} className="w-full bg-pink-500 text-white py-3.5 rounded-2xl font-black shadow-lg shadow-pink-200 hover:bg-pink-600 hover:scale-[1.02] transition-all">
+          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} className={`w-full h-32 p-4 border-2 border-white rounded-2xl text-sm font-bold focus:ring-4 focus:ring-${tc}-200 outline-none mb-4 resize-none shadow-inner bg-white/80`} placeholder="在此处粘贴 Excel 内容..." />
+          <button onClick={handleImport} className={`w-full bg-${tc}-500 text-white py-3.5 rounded-2xl font-black shadow-lg shadow-${tc}-200 hover:bg-${tc}-600 hover:scale-[1.02] transition-all`}>
             {t.importBtn}
           </button>
         </div>
@@ -651,6 +736,7 @@ function StudentsTab({ t, data, updateData }) {
 }
 
 function SubjectsTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [newSub, setNewSub] = useState('');
 
   const addSubject = () => {
@@ -663,16 +749,16 @@ function SubjectsTab({ t, data, updateData }) {
 
   return (
     <div className="p-4 md:p-6 flex-1">
-      <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2"><BookOpen className="text-pink-500"/> {t.subjects}</h2>
+      <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2"><BookOpen className={`text-${tc}-500`}/> {t.subjects}</h2>
       <div className="flex gap-3 mb-10 max-w-md">
-        <input type="text" value={newSub} onChange={(e) => setNewSub(e.target.value)} placeholder={t.subjectName} className="flex-1 px-5 py-3.5 bg-white/80 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-pink-200 font-bold shadow-inner" />
-        <button onClick={addSubject} className="bg-pink-500 text-white px-6 py-3.5 rounded-2xl font-black hover:bg-pink-600 hover:scale-105 flex items-center gap-2 shadow-lg shadow-pink-200 transition-all">
+        <input type="text" value={newSub} onChange={(e) => setNewSub(e.target.value)} placeholder={t.subjectName} className={`flex-1 px-5 py-3.5 bg-white/80 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-${tc}-200 font-bold shadow-inner`} />
+        <button onClick={addSubject} className={`bg-${tc}-500 text-white px-6 py-3.5 rounded-2xl font-black hover:bg-${tc}-600 hover:scale-105 flex items-center gap-2 shadow-lg shadow-${tc}-200 transition-all`}>
           <Plus className="w-5 h-5" /> 添加
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
         {data.subjects.map(sub => (
-          <div key={sub} className="bg-white/80 border-2 border-pink-50 p-6 rounded-[2rem] flex justify-between items-center group shadow-sm hover:shadow-md hover:-translate-y-1 transition-all">
+          <div key={sub} className={`bg-white/80 border-2 border-${tc}-50 p-6 rounded-[2rem] flex justify-between items-center group shadow-sm hover:shadow-md hover:-translate-y-1 transition-all`}>
             <span className="font-black text-slate-700 text-xl">{sub}</span>
             <button onClick={() => removeSubject(sub)} className="p-2.5 bg-red-50 rounded-xl text-red-400 hover:text-white hover:bg-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-all font-bold">
               <Trash2 className="w-5 h-5" />
@@ -685,6 +771,7 @@ function SubjectsTab({ t, data, updateData }) {
 }
 
 function ConductTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
@@ -714,16 +801,16 @@ function ConductTab({ t, data, updateData }) {
     <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="flex flex-col gap-4 mb-6 border-b-2 border-white pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Smile className="text-pink-500"/> {t.conduct}</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Smile className={`text-${tc}-500`}/> {t.conduct}</h2>
           <div className="flex flex-wrap gap-3">
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className={`px-4 py-2 bg-${tc}-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer transition-colors`}>
               {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
             </select>
             <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
               <option value="">{t.allClasses}</option>
               {classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className={`px-4 py-2 bg-${tc}-50 border-2 border-${tc}-100 rounded-2xl font-black text-${tc}-700 outline-none transition-colors`}>
               <option value="">-- {t.selectSubject} --</option>
               {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -733,13 +820,13 @@ function ConductTab({ t, data, updateData }) {
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
-          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期和科目</p>
+          <p className="text-slate-400 font-black text-xl">请先在上方选择学期和科目</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
             <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+              <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors`}>
                 <tr>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-24">{t.className}</th>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
@@ -751,8 +838,8 @@ function ConductTab({ t, data, updateData }) {
                 {filteredStudents.map(s => {
                   const studentTraits = data.conducts?.[selTerm]?.[selSub]?.[s.id] || [];
                   return (
-                    <tr key={s.id} className="border-b-2 border-white/50 hover:bg-pink-50/40 transition-colors">
-                      <td className="py-4 px-5 font-black text-pink-600 text-lg">{s.className}</td>
+                    <tr key={s.id} className={`border-b-2 border-white/50 hover:bg-${tc}-50/40 transition-colors`}>
+                      <td className={`py-4 px-5 font-black text-${tc}-600 text-lg`}>{s.className}</td>
                       <td className="py-4 px-5">
                         <div className="font-black text-slate-800 text-lg">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-bold">{s.malayName}</div>
@@ -805,8 +892,18 @@ function ConductTab({ t, data, updateData }) {
   );
 }
 
-// 功课登记 (保留选择打分功能，移除下方的历史列表)
-function HomeworkTab({ t, data, updateData }) {
+// 终极功课评价配置：非常优秀(100)、达标(80)、还可以(60)、不达标(0)、没有做(0)、缺席(豁免不计)
+const statusConfig = [
+  { color: 'blue', label: '非常优秀', bg: 'bg-blue-500 hover:bg-blue-600', text: 'text-white' },
+  { color: 'green', label: '达标', bg: 'bg-green-500 hover:bg-green-600', text: 'text-white' },
+  { color: 'yellow', label: '还可以', bg: 'bg-yellow-400 hover:bg-yellow-500', text: 'text-yellow-900' },
+  { color: 'red', label: '不达标', bg: 'bg-rose-500 hover:bg-rose-600', text: 'text-white' },
+  { color: 'black', label: '缺席', bg: 'bg-slate-800 hover:bg-slate-900', text: 'text-white' },
+  { color: 'gray', label: '没有做', bg: 'bg-slate-300 hover:bg-slate-400', text: 'text-slate-700' },
+];
+
+function HomeworkEntryTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
@@ -814,6 +911,19 @@ function HomeworkTab({ t, data, updateData }) {
 
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
+
+  // 获取过去10次的功课记录 (为了快捷按钮)
+  const historyShortcuts = useMemo(() => {
+    if (!selTerm || !selSub) return [];
+    const hwData = data.homeworks?.[selTerm]?.[selSub] || {};
+    const titleData = data.homeworkTitles?.[selTerm]?.[selSub] || {};
+    const dates = Array.from(new Set([...Object.keys(hwData), ...Object.keys(titleData)]));
+    dates.sort((a, b) => new Date(b) - new Date(a));
+    return dates.slice(0, 10).map(d => ({
+      date: d,
+      title: titleData[d] || '无标题'
+    }));
+  }, [data.homeworks, data.homeworkTitles, selTerm, selSub]);
 
   const currentHwTitle = data.homeworkTitles?.[selTerm]?.[selSub]?.[dateStr] || '';
   const handleTitleChange = (val) => {
@@ -862,40 +972,20 @@ function HomeworkTab({ t, data, updateData }) {
     exportToXlsWithStyles(html, `${selTerm}_${selClass || '所有班级'}_${selSub}_${dateStr}_功课`);
   };
 
-  const hwCols = statusConfig.map(sc => ({ key: sc.color, label: sc.label }));
-  hwCols.push({ key: 'none', label: '无记录' });
-  const hwStats = { male: {}, female: {}, total: {} };
-  hwCols.forEach(c => { hwStats.male[c.key]=0; hwStats.female[c.key]=0; hwStats.total[c.key]=0; });
-
-  if (selSub) {
-    filteredStudents.forEach(s => {
-      const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id] || 'none';
-      const g = (s.gender || '').toUpperCase();
-      const isM = g.includes('男') || g === 'M' || g === 'L' || g.includes('LELAKI');
-      const isF = g.includes('女') || g === 'F' || g === 'P' || g.includes('PEREMPUAN');
-
-      if (hwStats.total[st] !== undefined) {
-         if (isM) hwStats.male[st]++;
-         else if (isF) hwStats.female[st]++;
-         hwStats.total[st]++;
-      }
-    });
-  }
-
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="flex flex-col gap-4 mb-6 border-b-2 border-white pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><PenTool className="text-pink-500"/> {t.homework}</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><PenTool className={`text-${tc}-500`}/> {t.homeworkEntry}</h2>
           <div className="flex flex-wrap gap-3">
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className={`px-4 py-2 bg-${tc}-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer transition-colors`}>
               {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
             </select>
             <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
               <option value="">{t.allClasses}</option>
               {classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className={`px-4 py-2 bg-${tc}-50 border-2 border-${tc}-100 rounded-2xl font-black text-${tc}-700 outline-none transition-colors`}>
               <option value="">-- {t.selectSubject} --</option>
               {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -907,29 +997,49 @@ function HomeworkTab({ t, data, updateData }) {
             )}
           </div>
         </div>
+
         {selSub && (
-          <div className="w-full mt-2 bg-white/60 px-5 py-3.5 rounded-2xl border-2 border-white flex items-center gap-3 shadow-inner">
-            <PenTool className="w-6 h-6 text-pink-500 shrink-0" />
-            <input 
-              type="text" 
-              value={currentHwTitle} 
-              onChange={e => handleTitleChange(e.target.value)}
-              placeholder="在这里填写今日功课内容标题 (例如: 单元一练习, Buku Kerja ms 10)..."
-              className="flex-1 bg-transparent border-none outline-none font-black text-slate-700 placeholder-slate-400/70 text-lg"
-            />
+          <div className="flex flex-col gap-3 mt-2">
+            <div className="w-full bg-white/60 px-5 py-3.5 rounded-2xl border-2 border-white flex items-center gap-3 shadow-inner">
+              <PenTool className={`w-6 h-6 text-${tc}-500 shrink-0`} />
+              <input 
+                type="text" 
+                value={currentHwTitle} 
+                onChange={e => handleTitleChange(e.target.value)}
+                placeholder="在这里填写今日功课内容标题 (例如: 单元一练习, Buku Kerja ms 10)..."
+                className="flex-1 bg-transparent border-none outline-none font-black text-slate-700 placeholder-slate-400/70 text-lg"
+              />
+            </div>
+            
+            {/* 过去10次功课快捷按钮 */}
+            {historyShortcuts.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                <span className="text-xs font-bold text-slate-400 whitespace-nowrap">最近记录:</span>
+                {historyShortcuts.map((item, idx) => (
+                  <button 
+                    key={idx} 
+                    onClick={() => setDateStr(item.date)}
+                    className={`flex flex-col items-start px-3 py-1.5 rounded-xl border border-white whitespace-nowrap transition-all flex-shrink-0 ${dateStr === item.date ? `bg-${tc}-100 shadow-inner` : 'bg-white/50 hover:bg-white shadow-sm'}`}
+                  >
+                    <span className={`text-[10px] font-black ${dateStr === item.date ? `text-${tc}-600` : 'text-slate-400'}`}>{item.date}</span>
+                    <span className="text-xs font-bold text-slate-700 max-w-[120px] truncate">{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
-          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期、科目和日期开始登记</p>
+          <p className="text-slate-400 font-black text-xl">请先在上方选择学期、科目和日期开始登记</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
             <table className="w-full text-left border-collapse min-w-[800px]">
-              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+              <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors`}>
                 <tr>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-24">{t.className}</th>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
@@ -942,8 +1052,8 @@ function HomeworkTab({ t, data, updateData }) {
                 {filteredStudents.map(s => {
                   const currentStatus = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
                   return (
-                    <tr key={s.id} className="border-b-2 border-white/50 hover:bg-pink-50/40 transition-colors">
-                      <td className="py-4 px-5 font-black text-pink-600 text-lg">{s.className}</td>
+                    <tr key={s.id} className={`border-b-2 border-white/50 hover:bg-${tc}-50/40 transition-colors`}>
+                      <td className={`py-4 px-5 font-black text-${tc}-600 text-lg`}>{s.className}</td>
                       <td className="py-4 px-5">
                         <div className="font-black text-slate-800 text-lg">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-bold">{s.malayName}</div>
@@ -971,17 +1081,14 @@ function HomeworkTab({ t, data, updateData }) {
               </tbody>
             </table>
           </div>
-          <StatTable title={`📊 功课状态统计 (${selTerm} - ${dateStr})`} columns={hwCols} stats={hwStats} />
         </div>
       )}
     </div>
   );
 }
 
-// =====================================
-// 全新: 功课历史查询记录 (Homework History)
-// =====================================
 function HomeworkHistoryTab({ t, data }) {
+  const { tc } = useContext(ThemeContext);
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
@@ -989,7 +1096,6 @@ function HomeworkHistoryTab({ t, data }) {
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
 
-  // 提取该学期该科目下，所有记录过的日期（并按时间倒序排，最新的在前）
   const historyDates = useMemo(() => {
     if (!selTerm || !selSub) return [];
     const hwData = data.homeworks?.[selTerm]?.[selSub] || {};
@@ -999,16 +1105,13 @@ function HomeworkHistoryTab({ t, data }) {
     return dates;
   }, [data.homeworks, data.homeworkTitles, selTerm, selSub]);
 
-  // 获取某一天的完成度统计（已达标人数/总有效人数）
   const getDailyStats = (dateStr) => {
      let done = 0;
      let totalValid = 0;
      filteredStudents.forEach(s => {
        const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
-       // 只要有记录且不是缺席，就算作有效人数
        if (st && st !== 'black') {
           totalValid++;
-          // 蓝、绿、黄 都算作“交了并有程度”
           if (st === 'blue' || st === 'green' || st === 'yellow') done++;
        }
      });
@@ -1048,16 +1151,16 @@ function HomeworkHistoryTab({ t, data }) {
     <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="flex flex-col gap-4 mb-6 border-b-2 border-white pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><History className="text-pink-500"/> {t.homeworkHistory}</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><History className={`text-${tc}-500`}/> {t.homeworkHistory}</h2>
           <div className="flex flex-wrap gap-3">
-            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className={`px-4 py-2 bg-${tc}-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer transition-colors`}>
               {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
             </select>
             <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
               <option value="">{t.allClasses}</option>
               {classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className={`px-4 py-2 bg-${tc}-50 border-2 border-${tc}-100 rounded-2xl font-black text-${tc}-700 outline-none transition-colors`}>
               <option value="">-- {t.selectSubject} --</option>
               {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -1072,7 +1175,7 @@ function HomeworkHistoryTab({ t, data }) {
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
-          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期和科目以查看历史</p>
+          <p className="text-slate-400 font-black text-xl">请先在上方选择学期和科目以查看历史</p>
         </div>
       ) : historyDates.length === 0 ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
@@ -1082,7 +1185,7 @@ function HomeworkHistoryTab({ t, data }) {
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
             <table className="w-full text-left border-collapse min-w-[1200px]">
-              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+              <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors`}>
                 <tr>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-24">{t.className}</th>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
@@ -1091,7 +1194,7 @@ function HomeworkHistoryTab({ t, data }) {
                      const { done, totalValid } = getDailyStats(d);
                      return (
                         <th key={d} className="py-3 px-3 border-b-2 border-l-2 border-white text-center min-w-[140px]">
-                           <div className="text-sm font-bold text-pink-600 mb-1 flex items-center justify-center gap-1">
+                           <div className={`text-sm font-bold text-${tc}-600 mb-1 flex items-center justify-center gap-1`}>
                               <Clock className="w-3.5 h-3.5" /> {d}
                            </div>
                            <div className="text-xs font-black text-slate-800 line-clamp-2 leading-tight mb-2 h-8" title={title}>{title}</div>
@@ -1106,8 +1209,8 @@ function HomeworkHistoryTab({ t, data }) {
               <tbody>
                 {filteredStudents.map(s => {
                   return (
-                    <tr key={s.id} className="border-b-2 border-white/50 hover:bg-pink-50/40 transition-colors">
-                      <td className="py-4 px-5 font-black text-pink-600 text-lg">{s.className}</td>
+                    <tr key={s.id} className={`border-b-2 border-white/50 hover:bg-${tc}-50/40 transition-colors`}>
+                      <td className={`py-4 px-5 font-black text-${tc}-600 text-lg`}>{s.className}</td>
                       <td className="py-4 px-5">
                         <div className="font-black text-slate-800 text-lg">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-bold">{s.malayName}</div>
@@ -1141,6 +1244,7 @@ function HomeworkHistoryTab({ t, data }) {
 }
 
 function ExamsTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
@@ -1293,21 +1397,21 @@ function ExamsTab({ t, data, updateData }) {
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="flex flex-wrap gap-4 items-center justify-between mb-6 border-b-2 border-white pb-6">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><ClipboardList className="text-pink-500"/> {t.exam}</h2>
+        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><ClipboardList className={`text-${tc}-500`}/> {t.exam}</h2>
         <div className="flex flex-wrap gap-3">
-          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className={`px-4 py-2 bg-${tc}-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer transition-colors`}>
             {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
           </select>
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
             <option value="">{t.allClasses}</option>
             {classes.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={selSub} onChange={e=>{setSelSub(e.target.value); setSelExamId('');}} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+          <select value={selSub} onChange={e=>{setSelSub(e.target.value); setSelExamId('');}} className={`px-4 py-2 bg-${tc}-50 border-2 border-${tc}-100 rounded-2xl font-black text-${tc}-700 outline-none transition-colors`}>
             <option value="">-- {t.selectSubject} --</option>
             {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {selSub && (
-            <select value={selExamId} onChange={e=>setSelExamId(e.target.value)} className="px-4 py-2 bg-rose-100 border-2 border-rose-200 rounded-2xl font-black text-rose-700 outline-none">
+            <select value={selExamId} onChange={e=>setSelExamId(e.target.value)} className={`px-4 py-2 bg-${tc}-100 border-2 border-${tc}-200 rounded-2xl font-black text-${tc}-800 outline-none`}>
               <option value="">-- 选择考试 --</option>
               {examsForSub.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
@@ -1327,33 +1431,33 @@ function ExamsTab({ t, data, updateData }) {
 
       {!selSub ? (
          <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
-           <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期和科目</p>
+           <p className="text-slate-400 font-black text-xl">请先在上方选择学期和科目</p>
          </div>
       ) : !currentExam ? (
         <div className="bg-white/80 p-8 border-2 border-white rounded-[2.5rem] shadow-lg max-w-xl mx-auto mt-10 backdrop-blur">
-          <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Plus className="w-6 h-6 text-pink-500"/> 在【{selTerm}】添加新考试</h3>
+          <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Plus className={`w-6 h-6 text-${tc}-500`}/> 在【{selTerm}】添加新考试</h3>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-black text-slate-700 mb-2">{t.examType}</label>
-              <input type="text" value={newExamName} onChange={e=>setNewExamName(e.target.value)} placeholder="如: 年中考、大考" className="w-full p-4 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-pink-200 font-bold shadow-inner bg-white/50"/>
+              <input type="text" value={newExamName} onChange={e=>setNewExamName(e.target.value)} placeholder="如: 年中考、大考" className={`w-full p-4 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-${tc}-200 font-bold shadow-inner bg-white/50`}/>
             </div>
             <div>
               <label className="block text-sm font-black text-slate-700 mb-2">{t.examParts}</label>
-              <input type="text" value={newExamParts} onChange={e=>setNewExamParts(e.target.value)} placeholder="如: 甲组, 乙组, 丙组 (逗号分隔)" className="w-full p-4 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-pink-200 font-bold shadow-inner bg-white/50"/>
+              <input type="text" value={newExamParts} onChange={e=>setNewExamParts(e.target.value)} placeholder="如: 甲组, 乙组, 丙组 (逗号分隔)" className={`w-full p-4 border-2 border-white rounded-2xl outline-none focus:ring-4 focus:ring-${tc}-200 font-bold shadow-inner bg-white/50`}/>
             </div>
-            <button onClick={createExam} className="w-full py-4 mt-4 bg-pink-500 text-white rounded-2xl font-black shadow-lg shadow-pink-200 hover:bg-pink-600 hover:scale-[1.02] transition-all">创建新考试配置</button>
+            <button onClick={createExam} className={`w-full py-4 mt-4 bg-${tc}-500 text-white rounded-2xl font-black shadow-lg shadow-${tc}-200 hover:bg-${tc}-600 hover:scale-[1.02] transition-all`}>创建新考试配置</button>
           </div>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
             <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+              <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors`}>
                 <tr>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-24">{t.className}</th>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
                   {currentExam.parts.map((pName, i) => (
-                    <th key={i} className="py-4 px-2 font-black text-pink-700 bg-pink-100/50 text-center border-b-2 border-white">{pName}</th>
+                    <th key={i} className={`py-4 px-2 font-black text-${tc}-700 bg-${tc}-100/50 text-center border-b-2 border-white`}>{pName}</th>
                   ))}
                   <th className="py-4 px-2 font-black text-rose-700 bg-rose-100/50 text-center border-b-2 border-white">{t.deduction}</th>
                   <th className="py-4 px-3 font-black text-slate-800 text-center bg-slate-100/50 border-b-2 border-white">{t.total50}</th>
@@ -1369,8 +1473,8 @@ function ExamsTab({ t, data, updateData }) {
                   const gradeInfo = getGradeInfo(rec);
                   
                   return (
-                    <tr key={s.id} className="border-b-2 border-white/50 hover:bg-pink-50/40 transition-colors">
-                      <td className="py-3 px-5 font-black text-pink-600 text-lg">{s.className}</td>
+                    <tr key={s.id} className={`border-b-2 border-white/50 hover:bg-${tc}-50/40 transition-colors`}>
+                      <td className={`py-3 px-5 font-black text-${tc}-600 text-lg`}>{s.className}</td>
                       <td className="py-3 px-5">
                         <div className="font-black text-slate-800 text-lg">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-bold">{s.malayName}</div>
@@ -1381,7 +1485,7 @@ function ExamsTab({ t, data, updateData }) {
                             type="number" min="0"
                             value={safeParts[i] === 0 ? '' : safeParts[i]} 
                             onChange={(e)=>updateScore(s.id, i, e.target.value)}
-                            className="w-16 px-2 py-2 border-2 border-white rounded-xl bg-white/80 text-center font-black text-pink-900 focus:ring-4 focus:ring-pink-200 outline-none shadow-inner"
+                            className={`w-16 px-2 py-2 border-2 border-white rounded-xl bg-white/80 text-center font-black text-${tc}-900 focus:ring-4 focus:ring-${tc}-200 outline-none shadow-inner`}
                             placeholder="0"
                           />
                         </td>
@@ -1418,6 +1522,7 @@ function ExamsTab({ t, data, updateData }) {
 }
 
 function AnalysisTab({ t, data, updateData }) {
+  const { tc } = useContext(ThemeContext);
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
@@ -1434,36 +1539,32 @@ function AnalysisTab({ t, data, updateData }) {
     return 1;
   };
 
-  // 生成双语智能评语
   const generateRemark = (tp, hwPct, conductTraits) => {
     let zh = "";
     let ms = "";
 
-    // 1. 学术基础评语 (根据系统建议TP)
     if (tp >= 5) {
        zh += "该名学生在学术上表现非常优异，展现了高度的理解与吸收能力。";
        ms += "Murid ini menunjukkan prestasi akademik yang cemerlang dan tahap pemahaman yang tinggi. ";
     } else if (tp >= 3) {
-       zh += "该名学生的表现达标，能掌握基本的知识，但仍有很大的进步空间。";
+       zh += "该名学生的表现达标，能掌握基本的知识，但仍有进步空间。";
        ms += "Murid ini mencapai tahap memuaskan, menguasai asas tetapi masih ada ruang untuk kemajuan. ";
     } else if (tp !== null) {
-       zh += "该名学生在本学科的基础较弱，需要更多的耐心指导与课后复习。";
-       ms += "Murid ini mempunyai asas yang agak lemah dalam subjek ini dan memerlukan lebih banyak bimbingan. ";
+       zh += "该名学生在本学科的基础较弱，需要更多的指导与复习。";
+       ms += "Murid ini mempunyai asas yang agak lemah dan memerlukan lebih banyak bimbingan. ";
     } else {
        zh += "暂无学术评定。";
-       ms += "Tiada penilaian akademik buat masa ini. ";
+       ms += "Tiada penilaian akademik. ";
     }
 
-    // 2. 功课评语
     if (hwPct >= 80) {
-       zh += "在功课方面，能按时且高质量地完成布置的作业。";
-       ms += "Kerja rumah sentiasa disiapkan tepat pada masanya dengan kualiti yang baik. ";
+       zh += "在功课方面，能按时且高质量地完成。";
+       ms += "Kerja rumah sentiasa disiapkan dengan kualiti yang baik. ";
     } else if (hwPct < 50 && hwPct !== null) {
-       zh += "需多加督促其按时完成功课，培养责任感。";
+       zh += "需多加督促其按时完成功课。";
        ms += "Perlu lebih pemantauan untuk memastikan kerja rumah disiapkan. ";
     }
 
-    // 3. 品行态度评语
     if (conductTraits.length > 0) {
        const pos = conductTraits.filter(t => CONDUCT_TRAITS.positive.some(p => p.id === t));
        const neg = conductTraits.filter(t => CONDUCT_TRAITS.negative.some(n => n.id === t));
@@ -1477,8 +1578,8 @@ function AnalysisTab({ t, data, updateData }) {
        if (neg.length > 0) {
           const negLabelsZh = neg.map(t => CONDUCT_TRAITS.negative.find(n => n.id === t).label).join('、');
           const negLabelsMs = neg.map(t => CONDUCT_TRAITS.negative.find(n => n.id === t).ms).join(', ');
-          zh += `然而，有时表现出${negLabelsZh}的一面，希望未来能加以改善。`;
-          ms += `Namun begitu, kadang-kala murid bersikap ${negLabelsMs}, diharap dapat diperbaiki pada masa hadapan.`;
+          zh += `然而，有时表现出${negLabelsZh}的一面，希望改善。`;
+          ms += `Kadang-kala murid bersikap ${negLabelsMs}, diharap dapat diperbaiki.`;
        }
     }
 
@@ -1486,13 +1587,12 @@ function AnalysisTab({ t, data, updateData }) {
   };
 
   const getTermSummary = (term, subject, studentId) => {
-    // 1. 终极版功课统计 (蓝色100, 绿色80, 黄色60, 红色0, 灰色0, 黑色不计入总数)
     const hws = data.homeworks?.[term]?.[subject] || {};
     let bl=0, g=0, y=0, r=0, b=0, gr=0, hwScore=0, hwCount=0;
     Object.values(hws).forEach(day => {
       const st = day[studentId];
       if(st) {
-         if (st !== 'black') hwCount++; // 缺席不计入总数 (豁免)
+         if (st !== 'black') hwCount++; 
          
          if(st === 'blue') { bl++; hwScore += 100; }
          else if(st === 'green') { g++; hwScore += 80; }
@@ -1532,7 +1632,6 @@ function AnalysisTab({ t, data, updateData }) {
       </div>
     );
 
-    // 2. 考试统计
     const exams = data.examsConfig?.[term]?.[subject] || [];
     let exScore = 0, exCount = 0;
     exams.forEach(ex => {
@@ -1550,7 +1649,6 @@ function AnalysisTab({ t, data, updateData }) {
     });
     const exPct = exCount > 0 ? Math.round(exScore / exCount) : null;
 
-    // 3. 品行加分与扣分统计 (Conduct Score)
     const studentConducts = data.conducts?.[term]?.[subject]?.[studentId] || [];
     let conductScore = 0;
     studentConducts.forEach(traitId => {
@@ -1560,7 +1658,6 @@ function AnalysisTab({ t, data, updateData }) {
        if (negTrait) conductScore += negTrait.score;
     });
 
-    // 4. 综合评定 (功课 50% + 考试 30% + 上个学期TP 20% + 品行附加分)
     let prevTerm = null;
     if (term === '第二学期') prevTerm = '第一学期';
     if (term === '第三学期') prevTerm = '第二学期';
@@ -1573,14 +1670,13 @@ function AnalysisTab({ t, data, updateData }) {
     if (hwPct !== null) { totalWeight += 0.5; totalScore += hwPct * 0.5; }
     if (exPct !== null) { totalWeight += 0.3; totalScore += exPct * 0.3; }
     if (prevTP !== null) { 
-       const tpMap = {6:95, 5:80, 4:65, 3:50, 2:30, 1:15}; // TP 转换为基准分
+       const tpMap = {6:95, 5:80, 4:65, 3:50, 2:30, 1:15}; 
        totalWeight += 0.2; 
        totalScore += (tpMap[prevTP] || 0) * 0.2; 
     }
 
     let overallPct = null;
     if (totalWeight > 0) {
-       // 计算核心基础分，然后加上品行分，最高不超过100，最低不低于0
        let basePct = Math.round(totalScore / totalWeight);
        overallPct = Math.min(100, Math.max(0, basePct + conductScore));
     }
@@ -1588,7 +1684,6 @@ function AnalysisTab({ t, data, updateData }) {
     const suggestedTP = (totalWeight === 0 && conductScore === 0) ? null : getSuggestedTP(overallPct || (conductScore > 0 ? conductScore : 0));
     const prevTPText = prevTP !== null ? `TP${prevTP}` : '-';
 
-    // 5. 生成系统评语
     const remarks = generateRemark(suggestedTP, hwPct, studentConducts);
 
     return {
@@ -1702,16 +1797,16 @@ function AnalysisTab({ t, data, updateData }) {
   return (
     <div className="p-4 md:p-6 flex-1 flex flex-col min-h-0">
       <div className="flex flex-wrap justify-between items-center mb-8 border-b-2 border-white pb-6 gap-4 shrink-0">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><BarChart2 className="text-pink-500"/> {t.compareByStudent} (学期汇总)</h2>
+        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><BarChart2 className={`text-${tc}-500`}/> {t.compareByStudent} (学期汇总)</h2>
         <div className="flex flex-wrap gap-3">
-          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+          <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className={`px-4 py-2 bg-${tc}-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer transition-colors`}>
             {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
           </select>
           <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
             <option value="">{t.allClasses}</option>
             {classes.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+          <select value={selSub} onChange={e=>setSelSub(e.target.value)} className={`px-4 py-2 bg-${tc}-50 border-2 border-${tc}-100 rounded-2xl font-black text-${tc}-700 outline-none transition-colors`}>
             <option value="">-- {t.selectSubject} --</option>
             {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -1734,7 +1829,7 @@ function AnalysisTab({ t, data, updateData }) {
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40 p-16">
-          <p className="text-slate-400 font-black text-xl">🌸 请在上方选择学期和科目，生成综合分析名单</p>
+          <p className="text-slate-400 font-black text-xl">请在上方选择学期和科目，生成综合分析名单</p>
         </div>
       ) : studentsWithData.length === 0 ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40 p-16">
@@ -1744,21 +1839,21 @@ function AnalysisTab({ t, data, updateData }) {
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
             <table className="w-full text-left border-collapse min-w-[1500px]">
-              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+              <thead className={`sticky top-0 bg-${tc}-50/80 backdrop-blur-md z-10 shadow-sm transition-colors`}>
                 <tr>
                   <th className="py-4 px-4 font-black text-slate-700 border-b-2 border-white w-20">{t.className}</th>
                   <th className="py-4 px-4 font-black text-slate-700 border-b-2 border-white w-40">姓名</th>
                   <th className="py-4 px-4 font-black text-slate-700 border-b-2 border-white">
-                    <div className="text-pink-600">{selTerm}</div>功课累计 (50%)
+                    <div className={`text-${tc}-600`}>{selTerm}</div>功课累计 (50%)
                   </th>
                   <th className="py-4 px-3 font-black text-slate-700 border-b-2 border-white text-center w-28">
-                    <div className="text-pink-600">{selTerm}</div>所有考试平均 (30%)
+                    <div className={`text-${tc}-600`}>{selTerm}</div>所有考试 (30%)
                   </th>
                   <th className="py-4 px-3 font-black text-slate-700 border-b-2 border-white text-center w-28">
-                    <div className="text-pink-600">{selTerm}</div>品行附加分
+                    <div className={`text-${tc}-600`}>{selTerm}</div>品行附加分
                   </th>
                   <th className="py-4 px-3 font-black text-slate-700 border-b-2 border-white text-center w-32 bg-white/50">
-                    <div className="text-pink-600">{selTerm}</div>系统建议 TP<br/><span className="text-[10px] text-slate-500 font-bold">*(含20%上学期)*</span>
+                    <div className={`text-${tc}-600`}>{selTerm}</div>系统建议 TP<br/><span className="text-[10px] text-slate-500 font-bold">*(含20%上学期)*</span>
                   </th>
                   {SEMESTERS.map(term => (
                     <th key={term} className={`py-4 px-2 font-black text-center w-36 border-l-2 border-white border-b-2 ${term === selTerm ? 'bg-rose-50 text-rose-700' : 'text-slate-500 bg-white/50'}`}>
@@ -1774,8 +1869,8 @@ function AnalysisTab({ t, data, updateData }) {
                   const conductColor = s.summary.conductScore > 0 ? 'text-emerald-600' : s.summary.conductScore < 0 ? 'text-rose-600' : 'text-slate-400';
                   
                   return (
-                    <tr key={s.id} className={`border-b-2 border-white/50 transition-colors ${activeFinalTP ? 'bg-rose-50/40 hover:bg-rose-50/60' : 'hover:bg-pink-50/40'}`}>
-                      <td className="py-3 px-4 font-black text-pink-600 text-lg">{s.className}</td>
+                    <tr key={s.id} className={`border-b-2 border-white/50 transition-colors ${activeFinalTP ? 'bg-rose-50/40 hover:bg-rose-50/60' : `hover:bg-${tc}-50/40`}`}>
+                      <td className={`py-3 px-4 font-black text-${tc}-600 text-lg`}>{s.className}</td>
                       <td className="py-3 px-4">
                         <div className="font-black text-slate-800 text-lg truncate">{s.chineseName}</div>
                         <div className="text-xs text-slate-500 font-bold truncate">{s.malayName}</div>
@@ -1827,19 +1922,18 @@ function AnalysisTab({ t, data, updateData }) {
                         )
                       })}
                       
-                      {/* 评语栏 */}
                       <td className="py-3 px-4 border-l-2 border-white bg-white/80 min-w-[280px]">
                         {s.summary.suggestedTP ? (
                           <div className="flex flex-col gap-2">
                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 relative group shadow-sm">
                               <span className="font-black text-slate-700 block mb-1 text-xs">中文评语：</span>
                               <p className="text-slate-600 text-[11px] leading-relaxed font-bold">{s.summary.remarks.zh}</p>
-                              <button onClick={() => copyToClipboard(s.summary.remarks.zh)} className="absolute top-2 right-2 p-1.5 bg-white text-slate-400 hover:text-pink-600 rounded-md opacity-0 group-hover:opacity-100 transition-all shadow-sm"><Copy className="w-3 h-3"/></button>
+                              <button onClick={() => copyToClipboard(s.summary.remarks.zh)} className={`absolute top-2 right-2 p-1.5 bg-white text-slate-400 hover:text-${tc}-600 rounded-md opacity-0 group-hover:opacity-100 transition-all shadow-sm`}><Copy className="w-3 h-3"/></button>
                             </div>
                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 relative group shadow-sm">
                               <span className="font-black text-slate-700 block mb-1 text-xs">Ulasan (BM)：</span>
                               <p className="text-slate-600 text-[11px] leading-relaxed font-bold">{s.summary.remarks.ms}</p>
-                              <button onClick={() => copyToClipboard(s.summary.remarks.ms)} className="absolute top-2 right-2 p-1.5 bg-white text-slate-400 hover:text-pink-600 rounded-md opacity-0 group-hover:opacity-100 transition-all shadow-sm"><Copy className="w-3 h-3"/></button>
+                              <button onClick={() => copyToClipboard(s.summary.remarks.ms)} className={`absolute top-2 right-2 p-1.5 bg-white text-slate-400 hover:text-${tc}-600 rounded-md opacity-0 group-hover:opacity-100 transition-all shadow-sm`}><Copy className="w-3 h-3"/></button>
                             </div>
                           </div>
                         ) : <span className="text-sm font-bold text-slate-400 text-center block w-full">-</span>}
