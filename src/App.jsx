@@ -4,7 +4,8 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc } from "fireb
 import { 
   Users, BookOpen, PenTool, BarChart2, Settings, LogOut, 
   Globe, Plus, Trash2, FileText, CheckCircle, XCircle, Flower,
-  Edit2, Save, X, Calendar, ClipboardList, Loader2, Download, Smile, Copy
+  Edit2, Save, X, Calendar, ClipboardList, Loader2, Download, Smile, Copy,
+  History, Clock
 } from 'lucide-react';
 
 // ==========================================
@@ -57,7 +58,8 @@ const translations = {
     students: '学生管理',
     subjects: '科目管理',
     conduct: '品行态度',
-    homework: '功课记录',
+    homework: '功课登记', // 更改了名字
+    homeworkHistory: '功课历史', // 新增翻译
     exam: '考试成绩',
     analysis: '分析 & TP',
     adminPanel: '管理后台',
@@ -165,6 +167,16 @@ const getTpColorStyle = (tp) => {
    if (tp == 2 || tp == 1) return 'background-color: #fee2e2; color: #dc2626; font-weight: bold;';
    return '';
 };
+
+// 终极功课评价配置：非常优秀、达标、还可以、不达标、缺席、没有做
+const statusConfig = [
+  { color: 'blue', label: '非常优秀', bg: 'bg-blue-500 hover:bg-blue-600', text: 'text-white' },
+  { color: 'green', label: '达标', bg: 'bg-green-500 hover:bg-green-600', text: 'text-white' },
+  { color: 'yellow', label: '还可以', bg: 'bg-yellow-400 hover:bg-yellow-500', text: 'text-yellow-900' },
+  { color: 'red', label: '不达标', bg: 'bg-rose-500 hover:bg-rose-600', text: 'text-white' },
+  { color: 'black', label: '缺席', bg: 'bg-slate-800 hover:bg-slate-900', text: 'text-white' },
+  { color: 'gray', label: '没有做', bg: 'bg-slate-300 hover:bg-slate-400', text: 'text-slate-700' },
+];
 
 export default function App() {
   const [lang, setLang] = useState('zh');
@@ -466,7 +478,8 @@ function TeacherDashboard({ t, data, updateData }) {
     { id: 'students', icon: Users, label: t.students },
     { id: 'subjects', icon: BookOpen, label: t.subjects },
     { id: 'conduct', icon: Smile, label: t.conduct },
-    { id: 'homework', icon: Calendar, label: t.homework },
+    { id: 'homework', icon: PenTool, label: t.homework }, // 修改图标
+    { id: 'homeworkHistory', icon: History, label: t.homeworkHistory }, // 新增的 Tab
     { id: 'exams', icon: ClipboardList, label: t.exam },
     { id: 'analysis', icon: BarChart2, label: t.analysis },
   ];
@@ -499,6 +512,7 @@ function TeacherDashboard({ t, data, updateData }) {
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'conduct' && <ConductTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'homework' && <HomeworkTab t={t} data={data} updateData={updateData} />}
+        {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} />} {/* 新增路由 */}
         {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
       </div>
@@ -670,9 +684,6 @@ function SubjectsTab({ t, data, updateData }) {
   );
 }
 
-// =====================================
-// 新增: 品行与态度 (Conduct Tab)
-// =====================================
 function ConductTab({ t, data, updateData }) {
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
@@ -794,29 +805,12 @@ function ConductTab({ t, data, updateData }) {
   );
 }
 
+// 功课登记 (保留选择打分功能，移除下方的历史列表)
 function HomeworkTab({ t, data, updateData }) {
   const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
   const [selSub, setSelSub] = useState('');
   const [selClass, setSelClass] = useState('');
   const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
-
-  const historyList = useMemo(() => {
-    if (!selTerm || !selSub) return [];
-    const hwData = data.homeworks?.[selTerm]?.[selSub] || {};
-    const titleData = data.homeworkTitles?.[selTerm]?.[selSub] || {};
-
-    // 合并所有记录过功课状态和标题的日期，并去重
-    const dates = Array.from(new Set([...Object.keys(hwData), ...Object.keys(titleData)]));
-    
-    // 按日期降序排列 (最新的在最前)
-    dates.sort((a, b) => new Date(b) - new Date(a));
-
-    // 取前 10 个，并附带对应日期的标题
-    return dates.slice(0, 10).map(d => ({
-        date: d,
-        title: titleData[d] || '未命名功课项目'
-    }));
-  }, [data.homeworks, data.homeworkTitles, selTerm, selSub]);
 
   const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
   const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
@@ -844,16 +838,6 @@ function HomeworkTab({ t, data, updateData }) {
     }
     updateData({ homeworks: newHw });
   };
-
-  // 终极功课评价配置：非常优秀、达标、还可以、不达标、缺席、没有做
-  const statusConfig = [
-    { color: 'blue', label: t.hwBlue, bg: 'bg-blue-500 hover:bg-blue-600', text: 'text-white' },
-    { color: 'green', label: t.hwGreen, bg: 'bg-green-500 hover:bg-green-600', text: 'text-white' },
-    { color: 'yellow', label: t.hwYellow, bg: 'bg-yellow-400 hover:bg-yellow-500', text: 'text-yellow-900' },
-    { color: 'red', label: t.hwRed, bg: 'bg-rose-500 hover:bg-rose-600', text: 'text-white' },
-    { color: 'black', label: t.hwBlack, bg: 'bg-slate-800 hover:bg-slate-900', text: 'text-white' },
-    { color: 'gray', label: t.hwGray, bg: 'bg-slate-300 hover:bg-slate-400', text: 'text-slate-700' },
-  ];
 
   const exportHomeworkToExcel = () => {
     if (!selSub || !dateStr) return;
@@ -902,7 +886,7 @@ function HomeworkTab({ t, data, updateData }) {
     <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="flex flex-col gap-4 mb-6 border-b-2 border-white pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Calendar className="text-pink-500"/> {t.homework}</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><PenTool className="text-pink-500"/> {t.homework}</h2>
           <div className="flex flex-wrap gap-3">
             <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
               {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
@@ -918,7 +902,7 @@ function HomeworkTab({ t, data, updateData }) {
             <input type="date" value={dateStr} onChange={e=>setDateStr(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none"/>
             {selSub && (
               <button onClick={exportHomeworkToExcel} className="flex items-center gap-2 px-5 py-2 bg-emerald-500 text-white rounded-2xl font-black shadow-md hover:bg-emerald-600 transition-all hover:scale-105 ml-2">
-                <Download className="w-4 h-4" /> 导出彩色 Excel
+                <Download className="w-4 h-4" /> 导出当页 Excel
               </button>
             )}
           </div>
@@ -935,36 +919,11 @@ function HomeworkTab({ t, data, updateData }) {
             />
           </div>
         )}
-
-        {selSub && historyList.length > 0 && (
-          <div className="w-full mt-2 bg-white/40 p-4 rounded-2xl border-2 border-white shadow-sm flex flex-col gap-3">
-             <div className="text-sm font-black text-slate-500 flex items-center gap-2 px-1">
-                <Calendar className="w-4 h-4 text-pink-400" />
-                历史记录快捷找寻 (最近 10 次)
-             </div>
-             <div className="flex gap-3 overflow-x-auto pb-2 px-1 [&::-webkit-scrollbar]:hidden">
-                {historyList.map(h => (
-                   <button
-                     key={h.date}
-                     onClick={() => setDateStr(h.date)}
-                     className={`shrink-0 px-4 py-2.5 rounded-xl border-2 text-left transition-all min-w-[140px] max-w-[200px] ${
-                        dateStr === h.date 
-                        ? 'border-pink-400 bg-pink-100 shadow-md transform scale-105 z-10' 
-                        : 'border-white bg-white/80 hover:bg-pink-50 hover:border-pink-200 hover:shadow-sm'
-                     }`}
-                   >
-                     <div className={`text-xs font-bold ${dateStr === h.date ? 'text-pink-600' : 'text-slate-400'}`}>{h.date}</div>
-                     <div className={`text-sm font-black truncate mt-0.5 ${dateStr === h.date ? 'text-pink-800' : 'text-slate-700'}`}>{h.title}</div>
-                   </button>
-                ))}
-             </div>
-          </div>
-        )}
       </div>
 
       {!selSub ? (
         <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
-          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期、科目和日期</p>
+          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期、科目和日期开始登记</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
@@ -976,7 +935,6 @@ function HomeworkTab({ t, data, updateData }) {
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
                   <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white">
                     当前选择日期状态 ({dateStr})
-                    {currentHwTitle && <div className="text-pink-600 font-bold text-sm mt-1">{currentHwTitle}</div>}
                   </th>
                 </tr>
               </thead>
@@ -1014,6 +972,168 @@ function HomeworkTab({ t, data, updateData }) {
             </table>
           </div>
           <StatTable title={`📊 功课状态统计 (${selTerm} - ${dateStr})`} columns={hwCols} stats={hwStats} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================
+// 全新: 功课历史查询记录 (Homework History)
+// =====================================
+function HomeworkHistoryTab({ t, data }) {
+  const [selTerm, setSelTerm] = useState(SEMESTERS[0]);
+  const [selSub, setSelSub] = useState('');
+  const [selClass, setSelClass] = useState('');
+
+  const classes = useMemo(() => Array.from(new Set(data.students.map(s => s.className))).sort(), [data.students]);
+  const filteredStudents = useMemo(() => (!selClass ? data.students : data.students.filter(s => s.className === selClass)), [data.students, selClass]);
+
+  // 提取该学期该科目下，所有记录过的日期（并按时间倒序排，最新的在前）
+  const historyDates = useMemo(() => {
+    if (!selTerm || !selSub) return [];
+    const hwData = data.homeworks?.[selTerm]?.[selSub] || {};
+    const titleData = data.homeworkTitles?.[selTerm]?.[selSub] || {};
+    const dates = Array.from(new Set([...Object.keys(hwData), ...Object.keys(titleData)]));
+    dates.sort((a, b) => new Date(b) - new Date(a));
+    return dates;
+  }, [data.homeworks, data.homeworkTitles, selTerm, selSub]);
+
+  // 获取某一天的完成度统计（已达标人数/总有效人数）
+  const getDailyStats = (dateStr) => {
+     let done = 0;
+     let totalValid = 0;
+     filteredStudents.forEach(s => {
+       const st = data.homeworks?.[selTerm]?.[selSub]?.[dateStr]?.[s.id];
+       // 只要有记录且不是缺席，就算作有效人数
+       if (st && st !== 'black') {
+          totalValid++;
+          // 蓝、绿、黄 都算作“交了并有程度”
+          if (st === 'blue' || st === 'green' || st === 'yellow') done++;
+       }
+     });
+     return { done, totalValid };
+  };
+
+  const exportAllHistoryToExcel = () => {
+    if (!selSub || historyDates.length === 0) return;
+    
+    let html = `<table><thead><tr>
+      <th>学期</th><th>班级</th><th>中文姓名</th><th>马来文姓名</th>
+      ${historyDates.map(d => {
+         const title = data.homeworkTitles?.[selTerm]?.[selSub]?.[d] || '无标题';
+         return `<th>${d}<br/>${title}</th>`;
+      }).join('')}
+    </tr></thead><tbody>`;
+
+    filteredStudents.forEach(s => {
+      html += `<tr>
+        <td>${selTerm}</td><td>${s.className}</td><td>${s.chineseName}</td><td>${s.malayName}</td>`;
+        
+      historyDates.forEach(d => {
+        const st = data.homeworks?.[selTerm]?.[selSub]?.[d]?.[s.id];
+        const label = statusConfig.find(sc => sc.color === st)?.label || '-';
+        const style = getHwColorStyle(st);
+        html += `<td style="${style}">${label}</td>`;
+      });
+      
+      html += `</tr>`;
+    });
+    
+    html += `</tbody></table>`;
+    exportToXlsWithStyles(html, `${selTerm}_${selClass || '所有班级'}_${selSub}_功课历史总表`);
+  };
+
+  return (
+    <div className="p-4 md:p-6 h-full flex flex-col">
+      <div className="flex flex-col gap-4 mb-6 border-b-2 border-white pb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><History className="text-pink-500"/> {t.homeworkHistory}</h2>
+          <div className="flex flex-wrap gap-3">
+            <select value={selTerm} onChange={e=>setSelTerm(e.target.value)} className="px-4 py-2 bg-pink-500 text-white rounded-2xl font-black outline-none shadow-md cursor-pointer">
+              {SEMESTERS.map(sm => <option key={sm} value={sm}>{sm}</option>)}
+            </select>
+            <select value={selClass} onChange={e=>setSelClass(e.target.value)} className="px-4 py-2 bg-white/80 border-2 border-white rounded-2xl font-black text-slate-700 outline-none">
+              <option value="">{t.allClasses}</option>
+              {classes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={selSub} onChange={e=>setSelSub(e.target.value)} className="px-4 py-2 bg-pink-50 border-2 border-pink-100 rounded-2xl font-black text-pink-700 outline-none">
+              <option value="">-- {t.selectSubject} --</option>
+              {data.subjects.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {selSub && historyDates.length > 0 && (
+              <button onClick={exportAllHistoryToExcel} className="flex items-center gap-2 px-5 py-2 bg-emerald-500 text-white rounded-2xl font-black shadow-md hover:bg-emerald-600 transition-all hover:scale-105 ml-2">
+                <Download className="w-4 h-4" /> 导出历史总表
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!selSub ? (
+        <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
+          <p className="text-slate-400 font-black text-xl">🌸 请先在上方选择学期和科目以查看历史</p>
+        </div>
+      ) : historyDates.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center border-4 border-dashed border-white/60 rounded-[3rem] bg-white/40">
+          <p className="text-slate-400 font-black text-xl">目前该学期没有任何功课记录</p>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto rounded-[2rem] border-2 border-white/80 bg-white/60 shadow-inner relative">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
+              <thead className="sticky top-0 bg-pink-50/80 backdrop-blur-md z-10 shadow-sm">
+                <tr>
+                  <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-24">{t.className}</th>
+                  <th className="py-4 px-5 font-black text-slate-700 border-b-2 border-white w-48">姓名</th>
+                  {historyDates.map(d => {
+                     const title = data.homeworkTitles?.[selTerm]?.[selSub]?.[d] || '无标题';
+                     const { done, totalValid } = getDailyStats(d);
+                     return (
+                        <th key={d} className="py-3 px-3 border-b-2 border-l-2 border-white text-center min-w-[140px]">
+                           <div className="text-sm font-bold text-pink-600 mb-1 flex items-center justify-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> {d}
+                           </div>
+                           <div className="text-xs font-black text-slate-800 line-clamp-2 leading-tight mb-2 h-8" title={title}>{title}</div>
+                           <div className="text-[10px] font-bold text-slate-500 bg-white/50 rounded-lg py-1 shadow-inner">
+                              完成率: {totalValid > 0 ? `${done}/${totalValid}` : '-'}
+                           </div>
+                        </th>
+                     )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.map(s => {
+                  return (
+                    <tr key={s.id} className="border-b-2 border-white/50 hover:bg-pink-50/40 transition-colors">
+                      <td className="py-4 px-5 font-black text-pink-600 text-lg">{s.className}</td>
+                      <td className="py-4 px-5">
+                        <div className="font-black text-slate-800 text-lg">{s.chineseName}</div>
+                        <div className="text-xs text-slate-500 font-bold">{s.malayName}</div>
+                      </td>
+                      {historyDates.map(d => {
+                         const currentStatus = data.homeworks?.[selTerm]?.[selSub]?.[d]?.[s.id];
+                         const config = statusConfig.find(sc => sc.color === currentStatus);
+                         
+                         return (
+                            <td key={d} className="py-3 px-3 border-l-2 border-white/50 text-center">
+                               {config ? (
+                                  <span className={`inline-block px-3 py-1.5 rounded-xl text-xs font-black shadow-sm ${config.bg} ${config.text}`}>
+                                     {config.label}
+                                  </span>
+                               ) : (
+                                  <span className="text-slate-300 text-sm font-bold">-</span>
+                               )}
+                            </td>
+                         )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
