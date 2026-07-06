@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useContext } from 'react';
 import { initializeApp } from "firebase/app";
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { 
   Users, BookOpen, PenTool, BarChart2, Settings, LogOut, 
@@ -16,9 +17,9 @@ import {
 */
 
 // ==========================================
-// 1. 你的专属 Firebase 配置
+// 1. Firebase 配置与初始化 (支持 Canvas 环境规范)
 // ==========================================
-const firebaseConfig = {
+const userFirebaseConfig = {
   apiKey: "AIzaSyDYgQmxMcDQdnhw5IEMMdFpkff7SUN5L9M",
   authDomain: "pbd-sek-f0cbc.firebaseapp.com",
   projectId: "pbd-sek-f0cbc",
@@ -28,8 +29,12 @@ const firebaseConfig = {
   measurementId: "G-E4TXVG1X3Y"
 };
 
+// 优先使用环境注入的配置，否则使用用户提供的测试配置
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 const firestoreDb = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // ==========================================
 // 2. 基础配置与翻译
@@ -215,6 +220,9 @@ export default function App() {
   const [lang, setLang] = useState('zh');
   const t = translations[lang] || translations['zh'];
 
+  // Auth state
+  const [user, setUser] = useState(null);
+  
   const [authState, setAuthState] = useState('login');
   const [currentRoom, setCurrentRoom] = useState('');
   const [loadingDb, setLoadingDb] = useState(true);
@@ -222,8 +230,33 @@ export default function App() {
   
   const [db, setDb] = useState({ rooms: {}, logs: [], roomData: {} });
 
+  // 1. Initialize Auth FIRST (Mandatory Canvas Firebase Rule)
   useEffect(() => {
-    const unsubRooms = onSnapshot(collection(firestoreDb, 'rooms'), (snapshot) => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Fetch Data ONLY after Auth is successful
+  useEffect(() => {
+    if (!user) return; // Guard clause
+
+    // Canvas environment mandatory paths for public collaborative data
+    const roomsColRef = collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms');
+    const logsColRef = collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'logs');
+
+    const unsubRooms = onSnapshot(roomsColRef, (snapshot) => {
       const newRooms = {};
       const newRoomData = {};
       snapshot.forEach(docSnap => {
@@ -238,7 +271,7 @@ export default function App() {
       setLoadingDb(false);
     });
 
-    const unsubLogs = onSnapshot(collection(firestoreDb, 'logs'), (snapshot) => {
+    const unsubLogs = onSnapshot(logsColRef, (snapshot) => {
       const newLogs = [];
       snapshot.forEach(docSnap => newLogs.push({ id: docSnap.id, ...docSnap.data() }));
       newLogs.sort((a, b) => new Date(b.time) - new Date(a.time));
@@ -248,11 +281,11 @@ export default function App() {
     });
 
     return () => { unsubRooms(); unsubLogs(); };
-  }, []);
+  }, [user]); // Re-run when auth state changes
 
   const rawCurrentData = db.roomData[currentRoom] || {};
   
-  // 【关键修复】：兼容旧版本的纯文本数据格式 (兼容 ["华文", "数学"] 为 [{id:"华文", name:"华文"}])
+  // 兼容旧版本的纯文本数据格式
   const normalizedSubjects = (rawCurrentData.subjects || []).map(s => {
     if (typeof s === 'string') return { id: s, name: s };
     return s;
@@ -271,22 +304,21 @@ export default function App() {
     finalTPs: rawCurrentData.finalTPs || {}
   };
 
-  // 获取当前房间的主题，没有进入房间则使用本地预览主题
   const activeThemeKey = (currentRoom && db.rooms[currentRoom]?.theme) ? db.rooms[currentRoom].theme : localTheme;
   const currentThemeConfig = THEME_CONFIG[activeThemeKey] || THEME_CONFIG['pink'];
   const tc = currentThemeConfig.color;
 
   const changeTheme = async (newThemeKey) => {
-    if (currentRoom) {
-      const roomRef = doc(firestoreDb, 'rooms', currentRoom);
+    if (currentRoom && user) {
+      const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', currentRoom);
       await setDoc(roomRef, { theme: newThemeKey }, { merge: true });
     }
     setLocalTheme(newThemeKey);
   };
 
   const handleLogin = async (code, teacherName) => {
-    if (!code) return;
-    const roomRef = doc(firestoreDb, 'rooms', code);
+    if (!code || !user) return; // Guard
+    const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', code);
     
     if (!db.rooms[code]) {
       if (!teacherName) return; 
@@ -303,7 +335,7 @@ export default function App() {
       });
     }
 
-    await addDoc(collection(firestoreDb, 'logs'), {
+    await addDoc(collection(firestoreDb, 'artifacts', appId, 'public', 'data', 'logs'), {
       time: new Date().toISOString(),
       room: code,
       owner: db.rooms[code]?.owner || teacherName
@@ -316,20 +348,22 @@ export default function App() {
   const handleAdminLogin = () => setAuthState('admin');
 
   const updateRoomData = async (newData) => {
+    if (!user) return;
     const updatedData = { ...currentData, ...newData };
     setDb(prev => ({
       ...prev,
       roomData: { ...prev.roomData, [currentRoom]: updatedData }
     }));
-    const roomRef = doc(firestoreDb, 'rooms', currentRoom);
+    const roomRef = doc(firestoreDb, 'artifacts', appId, 'public', 'data', 'rooms', currentRoom);
     await setDoc(roomRef, { roomData: updatedData }, { merge: true });
   };
 
-  if (loadingDb) {
+  if (loadingDb || !user) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center relative overflow-hidden">
         <Loader2 className="w-10 h-10 text-slate-400 animate-spin mb-4 relative z-10" />
         <h2 className="text-xl font-bold text-slate-700 relative z-10">萌花系统加载中...</h2>
+        <p className="text-sm text-slate-500 mt-2 z-10">{!user ? "正在安全连接..." : "读取数据..."}</p>
       </div>
     );
   }
@@ -552,6 +586,7 @@ function StatTable({ title, columns, stats }) {
 function TeacherDashboard({ t, data, updateData }) {
   const { tc } = useContext(ThemeContext);
   const [activeTab, setActiveTab] = useState('students');
+  const [currentSemester, setCurrentSemester] = useState(SEMESTERS[0]); // 新增：全局学期状态
 
   const tabs = [
     { id: 'students', icon: Users, label: t.students },
@@ -567,6 +602,21 @@ function TeacherDashboard({ t, data, updateData }) {
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <div className="w-full lg:w-56 shrink-0 flex flex-row lg:flex-col gap-3 overflow-x-auto pb-2 lg:pb-0">
+        
+        {/* 新增: 学期选择器 */}
+        <div className="mb-2 p-2 bg-white/60 backdrop-blur rounded-[1.5rem] border-2 border-white shadow-sm shrink-0">
+          <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-2 mt-1 uppercase tracking-widest flex items-center gap-1">
+             <Calendar className="w-3 h-3"/> 设定当前学期
+          </label>
+          <select 
+            value={currentSemester} 
+            onChange={e => setCurrentSemester(e.target.value)}
+            className={`w-full p-3 bg-${tc}-100 text-${tc}-800 font-black rounded-xl outline-none text-center cursor-pointer shadow-inner appearance-none transition-colors hover:bg-${tc}-200`}
+          >
+            {SEMESTERS.map(sem => <option key={sem} value={sem}>{sem}</option>)}
+          </select>
+        </div>
+
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -588,14 +638,17 @@ function TeacherDashboard({ t, data, updateData }) {
       </div>
 
       <div className="flex-1 bg-white/80 backdrop-blur rounded-[2.5rem] shadow-xl border-2 border-white min-h-[750px] overflow-hidden flex flex-col p-2 md:p-4">
+        {/* 学生与科目不受学期影响 (全局通用) */}
         {activeTab === 'students' && <StudentsTab t={t} data={data} updateData={updateData} />}
         {activeTab === 'subjects' && <SubjectsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'conduct' && <ConductTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'homeworkEntry' && <HomeworkEntryTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} />}
-        {activeTab === 'skills' && <SkillsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} />}
-        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} />}
+        
+        {/* 以下评估类 Tab 均传入 currentSemester 以隔离数据 */}
+        {activeTab === 'conduct' && <ConductTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
+        {activeTab === 'homeworkEntry' && <HomeworkEntryTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
+        {activeTab === 'homeworkHistory' && <HomeworkHistoryTab t={t} data={data} currentSemester={currentSemester} />}
+        {activeTab === 'skills' && <SkillsTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
+        {activeTab === 'exams' && <ExamsTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
+        {activeTab === 'analysis' && <AnalysisTab t={t} data={data} updateData={updateData} currentSemester={currentSemester} />}
       </div>
     </div>
   );
@@ -750,7 +803,7 @@ function StudentsTab({ t, data, updateData }) {
           <textarea 
             value={importText} 
             onChange={e => setImportText(e.target.value)} 
-            placeholder="0123\tAhmad\t阿里\tL&#10;0124\tSiti\t西蒂\tP"
+            placeholder="0123	Ahmad	阿里	L&#10;0124	Siti	西蒂	P"
             className={`w-full flex-1 p-4 border-2 border-slate-100 rounded-xl resize-none focus:ring-4 focus:ring-${tc}-100 focus:border-${tc}-300 outline-none font-mono text-sm shadow-inner min-h-[150px]`}
           />
           <button onClick={handleImport} className={`w-full py-3 bg-gradient-to-r from-${tc}-500 to-${tc}-400 text-white rounded-xl font-extrabold shadow-md hover:scale-[1.02] active:scale-95 transition-transform flex items-center justify-center gap-2`}>
@@ -812,7 +865,7 @@ function SubjectsTab({ t, data, updateData }) {
   );
 }
 
-function ConductTab({ t, data, updateData }) {
+function ConductTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -823,8 +876,12 @@ function ConductTab({ t, data, updateData }) {
 
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
 
+  // 向后兼容：如果选择第一学期，使用纯 studentId 作为键；否则加上学期前缀。
+  const getConductKey = (studentId) => currentSemester === '第一学期' ? studentId : `${currentSemester}_${studentId}`;
+
   const toggleTrait = (studentId, traitId, type) => {
-    const studentConduct = data.conducts[studentId] || { positive: [], negative: [] };
+    const conductKey = getConductKey(studentId);
+    const studentConduct = data.conducts[conductKey] || { positive: [], negative: [] };
     const currentTraits = studentConduct[type] || [];
     
     let newTraits;
@@ -848,13 +905,13 @@ function ConductTab({ t, data, updateData }) {
     });
     newConduct.score = score;
 
-    updateData({ conducts: { ...data.conducts, [studentId]: newConduct } });
+    updateData({ conducts: { ...data.conducts, [conductKey]: newConduct } });
   };
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Smile className={`text-${tc}-500`}/> {t.conduct}</h2>
+         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Smile className={`text-${tc}-500`}/> {t.conduct} ({currentSemester})</h2>
          <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="px-4 py-2 border-2 border-white rounded-xl outline-none font-bold bg-white/80 shadow-sm">
             {classes.map((c, idx) => <option key={c || `class-${idx}`} value={c}>{c}</option>)}
          </select>
@@ -875,7 +932,8 @@ function ConductTab({ t, data, updateData }) {
                 <tr><td colSpan="4" className="text-center py-12 text-slate-400 font-bold">请先选择班级或添加学生</td></tr>
               )}
               {filteredStudents.map(student => {
-                const conduct = data.conducts[student.id] || { positive: [], negative: [], score: 0 };
+                const conductKey = getConductKey(student.id);
+                const conduct = data.conducts[conductKey] || { positive: [], negative: [], score: 0 };
                 return (
                   <tr key={student.id} className={`border-b border-white hover:bg-${tc}-50/30 transition-colors`}>
                     <td className="py-4 px-5 font-bold text-slate-700">
@@ -924,7 +982,7 @@ function ConductTab({ t, data, updateData }) {
   );
 }
 
-function HomeworkEntryTab({ t, data, updateData }) {
+function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -940,7 +998,11 @@ function HomeworkEntryTab({ t, data, updateData }) {
     if (!selectedSubject && data.subjects.length > 0) setSelectedSubject(data.subjects[0].id);
   }, [data.subjects, selectedSubject]);
 
-  const hwRecordKey = `${selectedClass}_${selectedSubject}_${selectedDate}`;
+  // 向后兼容设计：第一学期依然使用旧Key结构
+  const hwRecordKey = currentSemester === '第一学期' 
+    ? `${selectedClass}_${selectedSubject}_${selectedDate}` 
+    : `${currentSemester}_${selectedClass}_${selectedSubject}_${selectedDate}`;
+    
   const currentRecord = data.homeworks[hwRecordKey] || {};
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
 
@@ -977,7 +1039,7 @@ function HomeworkEntryTab({ t, data, updateData }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><PenTool className={`text-${tc}-500`}/> {t.homeworkEntry}</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><PenTool className={`text-${tc}-500`}/> {t.homeworkEntry} ({currentSemester})</h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end">
           <div>
@@ -1056,7 +1118,7 @@ function HomeworkEntryTab({ t, data, updateData }) {
   );
 }
 
-function HomeworkHistoryTab({ t, data }) {
+function HomeworkHistoryTab({ t, data, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -1072,9 +1134,18 @@ function HomeworkHistoryTab({ t, data }) {
   
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
   
-  // 找出该班级和科目的所有日期记录
-  const historyKeys = Object.keys(data.homeworks).filter(k => k.startsWith(`${selectedClass}_${selectedSubject}_`));
-  const dates = historyKeys.map(k => k.split('_')[2]).sort((a,b) => new Date(b) - new Date(a)); // 倒序排列日期
+  // 基于学期严格过滤记录
+  const prefix = currentSemester === '第一学期' 
+    ? `${selectedClass}_${selectedSubject}_` 
+    : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
+    
+  const historyKeys = Object.keys(data.homeworks).filter(k => k.startsWith(prefix));
+  
+  const dates = historyKeys.map(k => {
+    const parts = k.split('_');
+    // 如果是第一学期，日期在索引2；如果是第二/三学期，带有前缀，日期在索引3
+    return currentSemester === '第一学期' ? parts.slice(2).join('_') : parts.slice(3).join('_');
+  }).sort((a,b) => new Date(b) - new Date(a)); // 倒序排列日期
 
   const statusMap = {
     blue: '非常优秀', green: '达标', yellow: '还可以', red: '不达标', black: '缺席', gray: '没有做'
@@ -1082,7 +1153,7 @@ function HomeworkHistoryTab({ t, data }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><History className={`text-${tc}-500`}/> {t.homeworkHistory}</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><History className={`text-${tc}-500`}/> {t.homeworkHistory} ({currentSemester})</h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end">
           <div>
@@ -1107,7 +1178,9 @@ function HomeworkHistoryTab({ t, data }) {
                    <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white min-w-[150px] sticky left-0 bg-inherit z-20">姓名</th>
                    {dates.length === 0 && <th className="py-4 px-5 font-extrabold text-slate-700 border-b border-white">无记录</th>}
                    {dates.map(date => {
-                      const key = `${selectedClass}_${selectedSubject}_${date}`;
+                      const key = currentSemester === '第一学期' 
+                         ? `${selectedClass}_${selectedSubject}_${date}` 
+                         : `${currentSemester}_${selectedClass}_${selectedSubject}_${date}`;
                       const title = data.homeworkTitles[key] || '日常功课';
                       return (
                         <th key={date} className="py-2 px-3 font-extrabold text-slate-700 border-b border-white border-l text-center min-w-[100px]">
@@ -1129,7 +1202,9 @@ function HomeworkHistoryTab({ t, data }) {
                          </td>
                          {dates.length === 0 && <td className="py-3 px-5"></td>}
                          {dates.map(date => {
-                            const key = `${selectedClass}_${selectedSubject}_${date}`;
+                            const key = currentSemester === '第一学期' 
+                               ? `${selectedClass}_${selectedSubject}_${date}` 
+                               : `${currentSemester}_${selectedClass}_${selectedSubject}_${date}`;
                             const status = data.homeworks[key]?.[student.id];
                             return (
                                <td key={date} className="py-3 px-3 border-l border-white text-center">
@@ -1153,7 +1228,6 @@ function HomeworkHistoryTab({ t, data }) {
   );
 }
 
-// 辅助函数，将之前生成的css string转为react style object
 function getHwStyleObj(status) {
   if (status === 'blue') return { backgroundColor: '#3b82f6', color: 'white' };
   if (status === 'green') return { backgroundColor: '#22c55e', color: 'white' };
@@ -1164,10 +1238,7 @@ function getHwStyleObj(status) {
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// 新增: 技能评估 Tab
-// -----------------------------------------------------------------------------
-function SkillsTab({ t, data, updateData }) {
+function SkillsTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -1182,7 +1253,10 @@ function SkillsTab({ t, data, updateData }) {
     if (!selectedSubject && data.subjects.length > 0) setSelectedSubject(data.subjects[0].id);
   }, [data.subjects, selectedSubject]);
 
-  const configKey = `${selectedClass}_${selectedSubject}`;
+  const configKey = currentSemester === '第一学期' 
+    ? `${selectedClass}_${selectedSubject}` 
+    : `${currentSemester}_${selectedClass}_${selectedSubject}`;
+    
   const currentSkills = data.skillsConfig[configKey] || [];
   const records = data.skillRecords[configKey] || {};
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
@@ -1223,7 +1297,7 @@ function SkillsTab({ t, data, updateData }) {
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Award className={`text-${tc}-500`}/> {t.skills}</h2>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Award className={`text-${tc}-500`}/> {t.skills} ({currentSemester})</h2>
           <div className="flex gap-4 items-center">
              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="p-2 border border-white rounded-xl outline-none font-bold text-sm bg-white/80 shadow-sm min-w-[100px]">
                {classes.map((c, idx) => <option key={c || `class-${idx}`} value={c}>{c}</option>)}
@@ -1310,7 +1384,7 @@ function SkillsTab({ t, data, updateData }) {
   );
 }
 
-function ExamsTab({ t, data, updateData }) {
+function ExamsTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -1329,7 +1403,11 @@ function ExamsTab({ t, data, updateData }) {
   const [partsInput, setPartsInput] = useState('PartA, PartB');
   const [maxTotal, setMaxTotal] = useState(50);
   
-  const examId = `${selectedClass}_${selectedSubject}_${examName}`;
+  const prefix = currentSemester === '第一学期' 
+    ? `${selectedClass}_${selectedSubject}_` 
+    : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
+    
+  const examId = `${prefix}${examName}`;
   const config = data.examsConfig[examId];
   const records = data.examRecords[examId] || {};
 
@@ -1384,11 +1462,11 @@ function ExamsTab({ t, data, updateData }) {
     });
   };
 
-  const currentExamKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(`${selectedClass}_${selectedSubject}_`));
+  const currentExamKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(prefix));
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><ClipboardList className={`text-${tc}-500`}/> {t.exam}</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><ClipboardList className={`text-${tc}-500`}/> {t.exam} ({currentSemester})</h2>
        
        <div className="bg-white/60 p-5 rounded-3xl shadow-sm border-2 border-white mb-6 flex flex-col gap-4">
           <div className="flex flex-wrap gap-4 items-end">
@@ -1410,7 +1488,8 @@ function ExamsTab({ t, data, updateData }) {
                <select value={examName} onChange={e => setExamName(e.target.value)} className="w-full p-2 border rounded-xl outline-none font-bold text-sm bg-white">
                  <option value="">-- 新建考试 --</option>
                  {currentExamKeys.map((k, idx) => {
-                   const name = k.split('_')[2];
+                   const parts = k.split('_');
+                   const name = currentSemester === '第一学期' ? parts.slice(2).join('_') : parts.slice(3).join('_');
                    return <option key={k || `exam-${idx}`} value={name}>{name}</option>
                  })}
                </select>
@@ -1515,7 +1594,7 @@ function ExamsTab({ t, data, updateData }) {
   );
 }
 
-function AnalysisTab({ t, data, updateData }) {
+function AnalysisTab({ t, data, updateData, currentSemester }) {
   const { tc } = useContext(ThemeContext);
   const classes = useMemo(() => [...new Set(data.students.map(s => s.className))], [data.students]);
   const [selectedClass, setSelectedClass] = useState(classes[0] || '');
@@ -1531,8 +1610,11 @@ function AnalysisTab({ t, data, updateData }) {
   
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
   
-  // 最终TP录入与分析逻辑
-  const tpKey = `${selectedClass}_${selectedSubject}_final`;
+  // 最终TP录入与分析逻辑，按学期隔离
+  const tpKey = currentSemester === '第一学期' 
+    ? `${selectedClass}_${selectedSubject}_final` 
+    : `${currentSemester}_${selectedClass}_${selectedSubject}_final`;
+    
   const currentFinalTPs = data.finalTPs[tpKey] || {};
 
   const handleFinalTPChange = (studentId, val) => {
@@ -1560,11 +1642,13 @@ function AnalysisTab({ t, data, updateData }) {
   };
 
   const exportData = () => {
-    let html = '<table><tr><th>姓名</th><th>性别</th><th>技能得分 (40%)</th><th>考试得分 (60%)</th><th>综合百分比</th><th>建议TP</th><th>最终TP</th></tr>';
+    let html = `<table><tr><th colspan="7">${selectedClass} - ${selectedSubject} - ${currentSemester} 综合分析报告</th></tr>`;
+    html += '<tr><th>姓名</th><th>性别</th><th>技能得分 (40%)</th><th>考试得分 (60%)</th><th>综合百分比</th><th>建议TP</th><th>最终TP</th></tr>';
     filteredStudents.forEach(s => {
        const info = getStudentAnalysisInfo(s.id);
        const tp = currentFinalTPs[s.id] || '-';
-       let colorStyle = getTpColorStyle(tp);
+       let colorStyle = tp >= 5 ? 'background-color:#dcfce7;color:#15803d;' : (tp >= 3 ? 'background-color:#fef9c3;color:#a16207;' : 'background-color:#fee2e2;color:#b91c1c;');
+       if(tp === '-') colorStyle = '';
        html += `<tr>
          <td>${s.chineseName}</td>
          <td>${s.gender}</td>
@@ -1576,22 +1660,29 @@ function AnalysisTab({ t, data, updateData }) {
        </tr>`;
     });
     html += '</table>';
-    exportToXlsWithStyles(html, `综合分析_${selectedClass}`);
+    exportToXlsWithStyles(html, `综合分析_${selectedClass}_${currentSemester}`);
   };
 
   // --------------------------------------------------------------------------
-  // 核心计算逻辑：抽取学生的 技能百分比 与 考试百分比 并加权计算。
+  // 核心计算逻辑：严格抽离当前学期的 技能百分比 与 考试百分比 并加权计算。
   // --------------------------------------------------------------------------
   const getStudentAnalysisInfo = (studentId) => {
-     // 1. 获取技能评估 (40%)
-     const configKey = `${selectedClass}_${selectedSubject}`;
+     // 1. 获取技能评估 (40%) - 严格读取当前学期
+     const configKey = currentSemester === '第一学期' 
+        ? `${selectedClass}_${selectedSubject}` 
+        : `${currentSemester}_${selectedClass}_${selectedSubject}`;
+        
      const studentSkills = data.skillRecords[configKey]?.[studentId] || {};
      const skillTps = Object.values(studentSkills).map(Number).filter(n => !isNaN(n));
      const avgSkillTP = skillTps.length ? skillTps.reduce((a,b)=>a+b,0) / skillTps.length : 0;
      const skillPct = avgSkillTP ? (avgSkillTP / 6) * 100 : 0; // 把平均TP转换为百分制
 
-     // 2. 获取考试评估 (60%)
-     const examKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(`${selectedClass}_${selectedSubject}_`));
+     // 2. 获取考试评估 (60%) - 严格读取当前学期
+     const prefix = currentSemester === '第一学期' 
+        ? `${selectedClass}_${selectedSubject}_` 
+        : `${currentSemester}_${selectedClass}_${selectedSubject}_`;
+        
+     const examKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(prefix));
      let totalExamPct = 0;
      let examCount = 0;
      examKeys.forEach(k => {
@@ -1657,7 +1748,7 @@ function AnalysisTab({ t, data, updateData }) {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
-       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><BarChart2 className={`text-${tc}-500`}/> {t.analysis}</h2>
+       <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><BarChart2 className={`text-${tc}-500`}/> {t.analysis} ({currentSemester})</h2>
        
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white mb-6 flex flex-wrap gap-4 items-end justify-between">
           <div className="flex gap-4">
@@ -1747,13 +1838,13 @@ function AnalysisTab({ t, data, updateData }) {
           </div>
 
           <div className="flex flex-col gap-6 overflow-y-auto pr-2">
-            <StatTable title={`${selectedClass} - 最终决定 TP 统计 (基于右上角数据)`} columns={columns} stats={stats} />
+            <StatTable title={`${selectedClass} (${currentSemester}) - 最终决定 TP 统计`} columns={columns} stats={stats} />
             
             <div className={`bg-${tc}-50 p-6 rounded-[2rem] border-2 border-${tc}-100 shadow-inner flex flex-col gap-3`}>
-              <h3 className="font-extrabold text-slate-700">评分机制说明</h3>
+              <h3 className="font-extrabold text-slate-700">评分机制说明 ({currentSemester})</h3>
+              <p className="text-sm font-bold text-slate-600"><strong>• 学期隔离：</strong>现在的综合建议及最终决定 TP 将仅限当前【{currentSemester}】的数据进行计算，不影响其他学期。</p>
               <p className="text-sm font-bold text-slate-600"><strong>• 技能评估 (40%)：</strong>提取「技能评估Tab」中该学生的所有TP，计算平均值后折算为 100分制。</p>
               <p className="text-sm font-bold text-slate-600"><strong>• 考试成绩 (60%)：</strong>提取「考试成绩Tab」中该学生在本科目的所有考试记录，计算其平均百分比。</p>
-              <p className="text-sm font-bold text-slate-600"><strong>• 综合百分比：</strong>(技能成绩 × 0.4) + (考试成绩 × 0.6)。如果只有其中一项，则该项占 100%。</p>
               <p className="text-sm font-bold text-blue-700"><strong>• 快捷操作：</strong>您可以点击中间的“建议TP”方块，将其直接填入右侧；或者点击上方的“采用全部建议TP”按钮一键录入。</p>
             </div>
           </div>
