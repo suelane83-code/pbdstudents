@@ -1268,6 +1268,32 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
     });
   };
 
+  // 新增：导出技能 TP 至 Excel 的功能
+  const exportData = () => {
+    const subjectName = data.subjects.find(s => s.id === selectedSubject)?.name || '未知科目';
+    let html = `<table><tr><th colspan="${currentSkills.length + 4}" style="font-size:16px;">${currentSemester} - 技能评估: ${selectedClass} (${subjectName})</th></tr>`;
+    html += '<tr><th>姓名</th><th>马来文名</th><th>性别</th>';
+    currentSkills.forEach(skill => { html += `<th>${skill}</th>`; });
+    html += '<th>平均 TP</th></tr>';
+
+    filteredStudents.forEach(s => {
+      const studentRecord = records[s.id] || {};
+      const tpValues = currentSkills.map(sk => studentRecord[sk]).filter(v => v);
+      const avgTp = tpValues.length > 0 ? (tpValues.reduce((a,b)=>a+b,0) / tpValues.length).toFixed(1) : '-';
+
+      html += `<tr>
+        <td>${s.chineseName}</td>
+        <td>${s.malayName}</td>
+        <td>${s.gender}</td>`;
+      currentSkills.forEach(skill => {
+        html += `<td>${studentRecord[skill] || '-'}</td>`;
+      });
+      html += `<td>${avgTp}</td></tr>`;
+    });
+    html += '</table>';
+    exportToXlsWithStyles(html, `${currentSemester}_技能评估_${selectedClass}_${subjectName}`);
+  };
+
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -1275,7 +1301,7 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
             <Award className={`text-${tc}-500`}/> {t.skills}
             <span className="text-sm bg-slate-100 text-slate-500 px-3 py-1 rounded-full">{currentSemester}</span>
           </h2>
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-2 items-center">
              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="p-2 border border-white rounded-xl outline-none font-bold text-sm bg-white/80 shadow-sm min-w-[100px]">
                {classes.map((c, idx) => <option key={c || `class-${idx}`} value={c}>{c}</option>)}
              </select>
@@ -1283,11 +1309,15 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
                {data.subjects.length === 0 && <option key="empty" value="">(请先添加科目)</option>}
                {data.subjects.map((s, idx) => <option key={s.id || `sub-${idx}`} value={s.id}>{s.name}</option>)}
              </select>
+             {/* 新增导出按钮 */}
+             <button onClick={exportData} className="p-2 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 shadow-md transition-all flex items-center gap-1 ml-2" title="导出本班技能TP至Excel">
+               <Download className="w-5 h-5"/>
+             </button>
           </div>
        </div>
 
        <div className="bg-white/60 p-4 rounded-2xl shadow-sm border-2 border-white mb-6 flex flex-wrap gap-4 items-center">
-          <span className="text-sm font-bold text-slate-600">添加所评估的技能：</span>
+          <span className="text-sm font-bold text-slate-600">添加本班评估技能 <span className="text-[10px] text-orange-500 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">(各班独立)</span>：</span>
           <input 
              type="text" 
              value={newSkillName} 
@@ -1435,6 +1465,35 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
     });
   };
 
+  // 新增：导出考试成绩至 Excel 的功能
+  const exportData = () => {
+    if (!config) return alert('请先选择或创建一场考试');
+    const subjectName = data.subjects.find(s => s.id === selectedSubject)?.name || '未知科目';
+    let html = `<table><tr><th colspan="${config.parts.length + 8}" style="font-size:16px;">${currentSemester} - 考试成绩: ${examName} | ${selectedClass} (${subjectName})</th></tr>`;
+    html += '<tr><th>姓名</th><th>马来文名</th><th>性别</th>';
+    config.parts.forEach(p => { html += `<th>${p}</th>`; });
+    html += `<th>扣错字分</th><th>总分 (/${config.maxTotal})</th><th>百分比 (%)</th><th>等级</th><th>TP</th></tr>`;
+
+    filteredStudents.forEach(s => {
+       const rec = records[s.id] || { marks: {}, deduction: 0, total: 0, percentage: 0, grade: '-', tp: '-' };
+       html += `<tr>
+         <td>${s.chineseName}</td>
+         <td>${s.malayName}</td>
+         <td>${s.gender}</td>`;
+       config.parts.forEach(p => {
+         html += `<td>${rec.marks[p] !== undefined ? rec.marks[p] : '-'}</td>`;
+       });
+       html += `<td>${rec.deduction || 0}</td>
+         <td>${rec.total}</td>
+         <td>${rec.percentage}%</td>
+         <td>${rec.grade}</td>
+         <td>${rec.tp}</td>
+       </tr>`;
+    });
+    html += '</table>';
+    exportToXlsWithStyles(html, `${currentSemester}_考试成绩_${examName}_${selectedClass}_${subjectName}`);
+  };
+
   const currentExamKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(searchPrefix));
 
   return (
@@ -1459,15 +1518,23 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
                 {data.subjects.map((s, idx) => <option key={s.id || `sub-${idx}`} value={s.id}>{s.name}</option>)}
               </select>
             </div>
-            <div className="flex-1 min-w-[150px]">
-               <label className="block text-xs font-bold text-slate-500 mb-1">选择已有考试</label>
-               <select value={examName} onChange={e => setExamName(e.target.value)} className="w-full p-2 border rounded-xl outline-none font-bold text-sm bg-white">
-                 <option value="">-- 新建考试 --</option>
-                 {currentExamKeys.map((k, idx) => {
-                   const name = k.replace(searchPrefix, '');
-                   return <option key={k || `exam-${idx}`} value={name}>{name}</option>
-                 })}
-               </select>
+            <div className="flex-1 min-w-[200px] flex gap-2 items-end">
+               <div className="flex-1">
+                 <label className="block text-xs font-bold text-slate-500 mb-1">选择已有考试</label>
+                 <select value={examName} onChange={e => setExamName(e.target.value)} className="w-full p-2 border rounded-xl outline-none font-bold text-sm bg-white">
+                   <option value="">-- 新建考试 --</option>
+                   {currentExamKeys.map((k, idx) => {
+                     const name = k.replace(searchPrefix, '');
+                     return <option key={k || `exam-${idx}`} value={name}>{name}</option>
+                   })}
+                 </select>
+               </div>
+               {/* 导出按钮仅在选择了考试时出现 */}
+               {config && (
+                 <button onClick={exportData} className="px-4 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-md flex items-center gap-2 h-[42px]" title="导出本场考试成绩至Excel">
+                   <Download className="w-5 h-5"/> 导出
+                 </button>
+               )}
             </div>
           </div>
 
