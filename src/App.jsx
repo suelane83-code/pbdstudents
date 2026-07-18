@@ -106,8 +106,8 @@ const translations = {
     hwRed: '不达标',
     hwBlack: '缺席',
     hwGray: '没有做',
-    hwOrange: '没做完 (-5分)', // Added new homework status
-    hwPurple: '没有带 (-5分)', // Added new homework status
+    hwOrange: '没完成 (-5分)',
+    hwPurple: '没有带来 (-5分)',
     addExam: '添加考试',
     examType: '考试类型 (如: 年中考)',
     examParts: '考试部分 (逗号分隔, 如: PartA, PartB)',
@@ -1094,7 +1094,7 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
           <span className="text-sm font-bold text-slate-600 flex items-center mr-2">批量标记:</span>
           {statuses.map(stat => (
             <button key={stat.id} onClick={() => markAll(stat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-transform active:scale-95 shadow-sm hover:opacity-90 ${stat.color}`}>
-               全部 {stat.label.split(' ')[0]} {/* 只显示文字，不显示括号分值 */}
+               全部 {stat.label.split(' ')[0]} {/* 截取空格前的内容，隐藏 (-5分) 保持按钮整洁 */}
             </button>
           ))}
        </div>
@@ -1163,7 +1163,7 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
 
   const statusMap = {
     blue: '非常优秀', green: '达标', yellow: '还可以', red: '不达标', black: '缺席', gray: '没有做',
-    orange: '没做完 (-5分)', purple: '没有带 (-5分)'
+    orange: '没完成 (-5分)', purple: '没有带来 (-5分)'
   };
 
   return (
