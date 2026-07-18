@@ -9,7 +9,8 @@ import {
   History, Clock, AlertCircle, Award
 } from 'lucide-react';
 
-/* Tailwind Safelist for dynamic themes:
+/* Tailwind Safelist for dynamic themes */
+/*
   bg-pink-50 bg-pink-100 bg-pink-500 bg-pink-600 text-pink-400 text-pink-500 text-pink-600 text-pink-700 text-pink-900 border-pink-50 border-pink-100 border-pink-200 border-pink-500 focus:ring-pink-200 shadow-pink-200 shadow-pink-500 from-pink-50 from-pink-500 to-pink-400
   bg-yellow-50 bg-yellow-100 bg-yellow-500 bg-yellow-600 text-yellow-400 text-yellow-500 text-yellow-600 text-yellow-700 text-yellow-900 border-yellow-50 border-yellow-100 border-yellow-200 border-yellow-500 focus:ring-yellow-200 shadow-yellow-200 shadow-yellow-500 from-yellow-50 from-yellow-500 to-yellow-400
   bg-purple-50 bg-purple-100 bg-purple-500 bg-purple-600 text-purple-400 text-purple-500 text-purple-600 text-purple-700 text-purple-900 border-purple-50 border-purple-100 border-purple-200 border-purple-500 focus:ring-purple-200 shadow-purple-200 shadow-purple-500 from-purple-50 from-purple-500 to-purple-400
@@ -26,7 +27,8 @@ const userFirebaseConfig = {
   measurementId: "G-E4TXVG1X3Y"
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+// 强制使用您自己的 Firebase 配置，完全忽略沙盒环境中可能注入的 __firebase_config
+const firebaseConfig = userFirebaseConfig; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const firestoreDb = getFirestore(app);
@@ -104,6 +106,8 @@ const translations = {
     hwRed: '不达标',
     hwBlack: '缺席',
     hwGray: '没有做',
+    hwOrange: '没做完 (-5分)', // Added new homework status
+    hwPurple: '没有带 (-5分)', // Added new homework status
     addExam: '添加考试',
     examType: '考试类型 (如: 年中考)',
     examParts: '考试部分 (逗号分隔, 如: PartA, PartB)',
@@ -213,6 +217,7 @@ export default function App() {
   const [authState, setAuthState] = useState('login');
   const [currentRoom, setCurrentRoom] = useState('');
   const [loadingDb, setLoadingDb] = useState(true);
+  const [dbError, setDbError] = useState('');
   const [localTheme, setLocalTheme] = useState('pink');
   
   const [db, setDb] = useState({ rooms: {}, logs: [], roomData: {} });
@@ -220,11 +225,8 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        // 强制使用 Firebase 的匿名登录，忽略沙盒中可能注入的外部 token，确保在您的项目中获得权限
+        await signInAnonymously(auth);
       } catch (err) {
         console.error("Auth error:", err);
       }
@@ -251,8 +253,12 @@ export default function App() {
       });
       setDb(prev => ({ ...prev, rooms: newRooms, roomData: newRoomData }));
       setLoadingDb(false);
+      setDbError('');
     }, (error) => {
       console.error("Firebase read error (rooms):", error);
+      if (error.code === 'permission-denied' || (error.message && error.message.includes('permission'))) {
+        setDbError('Firebase 权限不足 (permission-denied)：请在 Firebase Console 中更新 Firestore 安全规则。');
+      }
       setLoadingDb(false);
     });
 
@@ -263,6 +269,9 @@ export default function App() {
       setDb(prev => ({ ...prev, logs: newLogs }));
     }, (error) => {
       console.error("Firebase read error (logs):", error);
+      if (error.code === 'permission-denied' || (error.message && error.message.includes('permission'))) {
+        setDbError('Firebase 权限不足 (permission-denied)：请在 Firebase Console 中更新 Firestore 安全规则。');
+      }
     });
 
     return () => { unsubRooms(); unsubLogs(); };
@@ -348,6 +357,44 @@ export default function App() {
         <Loader2 className="w-10 h-10 text-slate-400 animate-spin mb-4 relative z-10" />
         <h2 className="text-xl font-bold text-slate-700 relative z-10">萌花系统加载中...</h2>
         <p className="text-sm text-slate-500 mt-2 z-10">{!user ? "正在安全连接..." : "读取数据..."}</p>
+      </div>
+    );
+  }
+
+  if (dbError) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+        <FloatingBackground />
+        <div className="bg-white/90 backdrop-blur p-8 rounded-3xl shadow-xl shadow-red-200/50 border-2 border-red-100 max-w-lg relative z-10">
+          <AlertCircle className="w-16 h-16 text-red-500 mb-4 mx-auto" />
+          <h2 className="text-2xl font-black text-slate-800 mb-2">数据库连接被拒绝</h2>
+          <p className="text-red-600 font-bold mb-6">{dbError}</p>
+          
+          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-left">
+             <h3 className="font-extrabold text-slate-700 mb-3">💡 修复指南 (给系统管理员)：</h3>
+             <ol className="list-decimal pl-5 space-y-2 text-sm text-slate-600 font-bold">
+                <li>前往 <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-blue-500 underline">Firebase Console</a>，进入您的项目。</li>
+                <li>在左侧点击 <strong>Firestore Database</strong> {'>'} <strong>Rules</strong> 标签页。</li>
+                <li>将代码修改为以下内容并点击 <strong>Publish</strong>：
+                   <pre className="bg-slate-800 text-green-400 p-3 mt-2 rounded-xl font-mono text-[11px] overflow-x-auto shadow-inner">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`}
+                   </pre>
+                </li>
+                <li>确保 <strong>Authentication</strong> {'>'} <strong>Sign-in method</strong> 中已开启 <strong>Anonymous (匿名)</strong>。</li>
+             </ol>
+          </div>
+          
+          <button onClick={() => window.location.reload()} className="mt-6 w-full py-3.5 bg-red-500 text-white rounded-xl font-extrabold shadow-md hover:bg-red-600 hover:scale-[1.02] active:scale-95 transition-all">
+            我已在后台修改完毕，刷新页面重试
+          </button>
+        </div>
       </div>
     );
   }
@@ -568,7 +615,7 @@ function StatTable({ title, columns, stats }) {
 function TeacherDashboard({ t, data, updateData }) {
   const { tc } = useContext(ThemeContext);
   const [activeTab, setActiveTab] = useState('students');
-  const [currentSemester, setCurrentSemester] = useState('第一学期'); // 全局学期控制
+  const [currentSemester, setCurrentSemester] = useState('第一学期'); 
 
   const tabs = [
     { id: 'students', icon: Users, label: t.students },
@@ -584,7 +631,6 @@ function TeacherDashboard({ t, data, updateData }) {
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <div className="w-full lg:w-56 shrink-0 flex flex-col gap-3">
-        {/* 学期全局选择器 */}
         <div className="bg-white/90 backdrop-blur rounded-[1.5rem] p-3 shadow-md border-2 border-white mb-2">
            <label className="block text-xs font-black text-slate-500 mb-2 uppercase tracking-wider px-2">当前系统学期</label>
            <select 
@@ -986,7 +1032,9 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
     { id: 'yellow', label: t.hwYellow, color: 'bg-yellow-400 text-yellow-900' },
     { id: 'red', label: t.hwRed, color: 'bg-red-500 text-white' },
     { id: 'black', label: t.hwBlack, color: 'bg-slate-800 text-white' },
-    { id: 'gray', label: t.hwGray, color: 'bg-slate-300 text-slate-700' }
+    { id: 'gray', label: t.hwGray, color: 'bg-slate-300 text-slate-700' },
+    { id: 'orange', label: t.hwOrange, color: 'bg-orange-500 text-white' },
+    { id: 'purple', label: t.hwPurple, color: 'bg-purple-500 text-white' }
   ];
 
   const markHomework = (studentId, statusId) => {
@@ -1046,7 +1094,7 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
           <span className="text-sm font-bold text-slate-600 flex items-center mr-2">批量标记:</span>
           {statuses.map(stat => (
             <button key={stat.id} onClick={() => markAll(stat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-transform active:scale-95 shadow-sm hover:opacity-90 ${stat.color}`}>
-               全部 {stat.label}
+               全部 {stat.label.split(' ')[0]} {/* 只显示文字，不显示括号分值 */}
             </button>
           ))}
        </div>
@@ -1072,7 +1120,7 @@ function HomeworkEntryTab({ t, data, updateData, currentSemester }) {
                             <select 
                                value={currentRecord[student.id] || ''}
                                onChange={(e) => markHomework(student.id, e.target.value)}
-                               className={`w-full max-w-[160px] p-2.5 rounded-xl outline-none font-bold text-center border-2 cursor-pointer transition-colors shadow-sm ${getHwSelectBgClass(currentRecord[student.id])}`}
+                               className={`w-full max-w-[180px] p-2.5 rounded-xl outline-none font-bold text-center border-2 cursor-pointer transition-colors shadow-sm ${getHwSelectBgClass(currentRecord[student.id])}`}
                             >
                                <option value="">- 请选择 -</option>
                                {statuses.map(stat => (
@@ -1114,7 +1162,8 @@ function HomeworkHistoryTab({ t, data, currentSemester }) {
   const dates = historyKeys.map(k => k.replace(searchPrefix, '')).sort((a,b) => new Date(b) - new Date(a)); // 倒序排列日期
 
   const statusMap = {
-    blue: '非常优秀', green: '达标', yellow: '还可以', red: '不达标', black: '缺席', gray: '没有做'
+    blue: '非常优秀', green: '达标', yellow: '还可以', red: '不达标', black: '缺席', gray: '没有做',
+    orange: '没做完 (-5分)', purple: '没有带 (-5分)'
   };
 
   return (
@@ -1200,6 +1249,8 @@ function getHwStyleObj(status) {
   if (status === 'red') return { backgroundColor: '#ef4444', color: 'white' };
   if (status === 'black') return { backgroundColor: '#1e293b', color: 'white' };
   if (status === 'gray') return { backgroundColor: '#e2e8f0', color: '#475569' };
+  if (status === 'orange') return { backgroundColor: '#f97316', color: 'white' };
+  if (status === 'purple') return { backgroundColor: '#a855f7', color: 'white' };
   return {};
 }
 
@@ -1210,6 +1261,8 @@ function getHwSelectBgClass(status) {
   if (status === 'red') return 'bg-red-100 text-red-700 border-red-300';
   if (status === 'black') return 'bg-slate-700 text-white border-slate-800';
   if (status === 'gray') return 'bg-slate-200 text-slate-700 border-slate-300';
+  if (status === 'orange') return 'bg-orange-100 text-orange-700 border-orange-300';
+  if (status === 'purple') return 'bg-purple-100 text-purple-700 border-purple-300';
   return 'bg-white border-slate-200 text-slate-500 hover:border-slate-300';
 }
 
@@ -1268,7 +1321,6 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
     });
   };
 
-  // 新增：导出技能 TP 至 Excel 的功能
   const exportData = () => {
     const subjectName = data.subjects.find(s => s.id === selectedSubject)?.name || '未知科目';
     let html = `<table><tr><th colspan="${currentSkills.length + 4}" style="font-size:16px;">${currentSemester} - 技能评估: ${selectedClass} (${subjectName})</th></tr>`;
@@ -1309,7 +1361,6 @@ function SkillsTab({ t, data, updateData, currentSemester }) {
                {data.subjects.length === 0 && <option key="empty" value="">(请先添加科目)</option>}
                {data.subjects.map((s, idx) => <option key={s.id || `sub-${idx}`} value={s.id}>{s.name}</option>)}
              </select>
-             {/* 新增导出按钮 */}
              <button onClick={exportData} className="p-2 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 shadow-md transition-all flex items-center gap-1 ml-2" title="导出本班技能TP至Excel">
                <Download className="w-5 h-5"/>
              </button>
@@ -1465,7 +1516,6 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
     });
   };
 
-  // 新增：导出考试成绩至 Excel 的功能
   const exportData = () => {
     if (!config) return alert('请先选择或创建一场考试');
     const subjectName = data.subjects.find(s => s.id === selectedSubject)?.name || '未知科目';
@@ -1529,7 +1579,6 @@ function ExamsTab({ t, data, updateData, currentSemester }) {
                    })}
                  </select>
                </div>
-               {/* 导出按钮仅在选择了考试时出现 */}
                {config && (
                  <button onClick={exportData} className="px-4 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-md flex items-center gap-2 h-[42px]" title="导出本场考试成绩至Excel">
                    <Download className="w-5 h-5"/> 导出
@@ -1653,7 +1702,6 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
   const filteredStudents = data.students.filter(s => s.className === selectedClass);
   const semPrefix = currentSemester === '第一学期' ? '' : `${currentSemester}_`;
   
-  // 最终TP录入与分析逻辑
   const tpKey = `${semPrefix}${selectedClass}_${selectedSubject}_final`;
   const currentFinalTPs = data.finalTPs[tpKey] || {};
 
@@ -1704,14 +1752,12 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
   };
 
   const getStudentAnalysisInfo = (studentId) => {
-     // 1. 获取技能评估 (40%)
      const configKey = `${semPrefix}${selectedClass}_${selectedSubject}`;
      const studentSkills = data.skillRecords[configKey]?.[studentId] || {};
      const skillTps = Object.values(studentSkills).map(Number).filter(n => !isNaN(n));
      const avgSkillTP = skillTps.length ? skillTps.reduce((a,b)=>a+b,0) / skillTps.length : 0;
      const skillPct = avgSkillTP ? (avgSkillTP / 6) * 100 : 0; 
 
-     // 2. 获取考试评估 (60%)
      const searchPrefix = `${semPrefix}${selectedClass}_${selectedSubject}_`;
      const examKeys = Object.keys(data.examsConfig).filter(k => k.startsWith(searchPrefix));
      let totalExamPct = 0;
@@ -1725,7 +1771,6 @@ function AnalysisTab({ t, data, updateData, currentSemester }) {
      });
      const examPct = examCount ? (totalExamPct / examCount) : 0;
 
-     // 3. 计算最终百分比与建议TP
      let finalPct = 0;
      if (skillTps.length > 0 && examCount > 0) {
          finalPct = (skillPct * 0.4) + (examPct * 0.6); 
